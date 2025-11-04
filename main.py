@@ -1,36 +1,34 @@
 """
 ================================================================================
-NIFTY 50 OPTIONS INTRADAY TRADING BOT - PRODUCTION VERSION WITH P&L MANAGEMENT
+NIFTY 50 OPTIONS INTRADAY TRADING BOT - FIXED VERSION V3
 ================================================================================
 Strategy: Day's Open + VWAP + RSI + OI (Open Interest) Confirmation
 Timeframe: 5-Minute Candles (resampled from 1-minute live data)
 Data Source: Live from NSE via Upstox API
 
+✅ FIXED: OI Logic (CE high = Bullish, PE high = Bearish)
+✅ FIXED: Day's Open (fetched from 9:15 AM candle - ACTUAL today's open)
 
 BUY CALL (CE) when ALL align:
   ✅ Price > Day's Open
   ✅ Price > VWAP
   ✅ RSI > 60
-  ✅ OI Trend = Bullish (More PUT OI)
-
+  ✅ OI Trend = Bullish (More CALL OI)
 
 BUY PUT (PE) when ALL align:
   ✅ Price < Day's Open
   ✅ Price < VWAP
   ✅ RSI < 40
-  ✅ OI Trend = Bearish (More CALL OI)
-
+  ✅ OI Trend = Bearish (More PUT OI)
 
 P&L MANAGEMENT:
   🎯 Take Profit: ₹1,500 (₹20 per lot)
   🛡️ Stop Loss: ₹2,000 (₹26.67 per lot)
   📈 Trailing Stop: ₹500 (₹6.67 per lot) after TP
 
-
 Expected: 4-6 signals/day | 75-82% win rate
 ================================================================================
 """
-
 
 import requests
 import pandas as pd
@@ -41,29 +39,23 @@ import csv
 import os
 import logging
 
-
 # ==================== CONFIGURATION ====================
 ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTA5NzUxMGM5YzYzZDU4ZWViZjgwZDkiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MjIyNzQ3MiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYyMjkzNjAwfQ.ZqO_xW_7ShNalpapEdzocZy6sdRlqZdeLPUhTWXDYG8"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 
-
 # FOLDER CONFIGURATION
 TRADE_LOGS_DIR = "trade_logs"
 TERMINAL_LOGS_DIR = "terminal_logs"
 
-# Create folders if they don't exist
 os.makedirs(TRADE_LOGS_DIR, exist_ok=True)
 os.makedirs(TERMINAL_LOGS_DIR, exist_ok=True)
 
-# Generate timestamp (12-hour format with AM/PM)
 timestamp = dt.datetime.now().strftime('%Y-%m-%d_%I%M%S_%p')
 
-# File paths
 CSV_FILE = os.path.join(TRADE_LOGS_DIR, f"{timestamp}_trades.csv")
 TERMINAL_LOG_FILE = os.path.join(TERMINAL_LOGS_DIR, f"{timestamp}_terminal.log")
 
-# Setup dual logging (console + file)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -75,28 +67,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+SIGNAL_COOLDOWN = 300
 
-# SIGNAL COOLDOWN
-SIGNAL_COOLDOWN = 300  # 5 minutes
-
-
-# TRADING SETTINGS
-LOT_SIZE = 75           # Nifty 50 lot size
-TAKE_PROFIT = 1500      # ₹1500 total profit
-STOP_LOSS = 2000        # ₹2000 total loss
-TRAILING_STOP = 500     # Trail by ₹500 after TP
+LOT_SIZE = 75
+TAKE_PROFIT = 1500
+STOP_LOSS = 2000
+TRAILING_STOP = 500
 # =======================================================
-
 
 last_signal_time = None
 current_expiry_date = None
 contracts_cache = []
 open_position = None
-
-
+days_open_cache = None
 
 # ==================== POSITION TRACKING ====================
-
 
 class Position:
     def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp):
@@ -111,7 +96,6 @@ class Position:
         self.trailing_stop_price = None
     
     def calculate_pnl(self, current_premium):
-        """Calculate P&L: (Current - Entry) × 75"""
         premium_diff = current_premium - self.entry_premium
         pnl = premium_diff * self.lot_size
         
@@ -121,26 +105,21 @@ class Position:
         return pnl, premium_diff
     
     def check_exit(self, current_premium):
-        """Check exit conditions"""
         pnl, premium_diff = self.calculate_pnl(current_premium)
         
-        # Stop Loss
         if pnl <= -STOP_LOSS:
             return True, f"STOP LOSS (Loss: ₹{abs(pnl):.2f})", pnl, premium_diff
         
-        # Take Profit - activate trailing
         if pnl >= TAKE_PROFIT:
             if not self.trailing_stop_active:
                 self.trailing_stop_active = True
                 self.trailing_stop_price = current_premium - (TRAILING_STOP / self.lot_size)
                 logger.info(f"  🎯 Take Profit reached! Trailing stop: ₹{self.trailing_stop_price:.2f}")
         
-        # Trailing Stop
         if self.trailing_stop_active:
             if current_premium <= self.trailing_stop_price:
                 return True, f"TRAILING STOP (Profit: ₹{pnl:.2f})", pnl, premium_diff
             
-            # Update trailing stop
             new_trail = current_premium - (TRAILING_STOP / self.lot_size)
             if new_trail > self.trailing_stop_price:
                 self.trailing_stop_price = new_trail
@@ -148,13 +127,9 @@ class Position:
         
         return False, None, pnl, premium_diff
 
-
-
 # ==================== DISCORD ====================
 
-
 def send_discord_alert(title, description, color=0x00ff00, fields=None):
-    """Send Discord notification"""
     if DISCORD_WEBHOOK_URL == "YOUR_DISCORD_WEBHOOK_URL_HERE":
         return
     
@@ -176,13 +151,9 @@ def send_discord_alert(title, description, color=0x00ff00, fields=None):
     except:
         pass
 
-
-
 # ==================== HELPER FUNCTIONS ====================
 
-
 def get_next_tuesday_expiry():
-    """Get next Tuesday expiry"""
     today = dt.datetime.now()
     
     if today.weekday() == 1:
@@ -198,16 +169,10 @@ def get_next_tuesday_expiry():
     
     return expiry.strftime('%Y-%m-%d')
 
-
-
 def get_arrow(current, reference):
-    """Return arrow"""
     return "🔺" if current > reference else "🔻" if current < reference else "➡️"
 
-
-
 def get_rsi_label(rsi):
-    """Return RSI label"""
     if rsi > 70:
         return "OVERBOUGHT ⚠️"
     elif rsi > 60:
@@ -219,13 +184,80 @@ def get_rsi_label(rsi):
     else:
         return "NEUTRAL"
 
+# ==================== FIXED: GET DAY'S OPEN FROM 9:15 AM CANDLE ====================
 
+def get_days_open_from_intraday():
+    """
+    FIXED: Get actual day's open from the first candle (9:15 AM)
+    This is the TRUE market open price for today
+    """
+    global days_open_cache
+    
+    # Return cached value if already fetched today
+    if days_open_cache is not None:
+        return days_open_cache
+    
+    try:
+        encoded_symbol = NIFTY_SYMBOL.replace("|", "%7C").replace(" ", "%20")
+        url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_symbol}/1minute"
+        
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {ACCESS_TOKEN}"
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            logger.warning(f"  ⚠️  Day's open API returned status {response.status_code}")
+            return None
+        
+        data = response.json()
+        
+        if "data" not in data or "candles" not in data["data"]:
+            logger.warning("  ⚠️  No candle data for day's open")
+            return None
+        
+        candles = data["data"]["candles"]
+        
+        if len(candles) == 0:
+            logger.warning("  ⚠️  Empty candles list")
+            return None
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(candles, columns=["time", "open", "high", "low", "close", "volume", "oi"])
+        df["time"] = pd.to_datetime(df["time"])
+        df = df.sort_values("time").reset_index(drop=True)
+        
+        # Get today's date
+        today = dt.datetime.now().date()
+        
+        # Filter only today's candles
+        df['date'] = df['time'].dt.date
+        today_candles = df[df['date'] == today]
+        
+        if len(today_candles) == 0:
+            logger.warning("  ⚠️  No candles found for today")
+            return None
+        
+        # Get the FIRST candle of today (9:15 AM candle)
+        first_candle = today_candles.iloc[0]
+        day_open = first_candle['open']
+        candle_time = first_candle['time']
+        
+        # Cache it
+        days_open_cache = day_open
+        
+        logger.info(f"  ✅ Day's Open (9:15 AM): {day_open:.2f} (from {candle_time.strftime('%I:%M %p')})")
+        return day_open
+        
+    except Exception as e:
+        logger.error(f"  ❌ Day's open fetch error: {e}")
+        return None
 
 # ==================== LIVE DATA FETCHING ====================
 
-
 def fetch_live_spot_candles(symbol):
-    """Fetch live 1-minute candles and resample to 5-minute"""
     encoded_symbol = symbol.replace("|", "%7C").replace(" ", "%20")
     url = f"https://api.upstox.com/v2/historical-candle/intraday/{encoded_symbol}/1minute"
     
@@ -268,13 +300,11 @@ def fetch_live_spot_candles(symbol):
         logger.info(f"  ✅ Fetched {len(candles)} 1-min → {len(df_5min)} 5-min candles")
         return df_5min
         
-    except:
+    except Exception as e:
+        logger.error(f"  ❌ Candle fetch error: {e}")
         return None
 
-
-
 def get_option_instruments():
-    """Get option instruments"""
     global current_expiry_date, contracts_cache
     
     current_expiry_date = get_next_tuesday_expiry()
@@ -325,13 +355,11 @@ def get_option_instruments():
         else:
             return [c["instrument_key"] for c in contracts_cache[:50]]
         
-    except:
+    except Exception as e:
+        logger.error(f"  ❌ Option instruments error: {e}")
         return []
 
-
-
 def get_spot_price():
-    """Get spot price"""
     try:
         encoded_symbol = NIFTY_SYMBOL.replace("|", "%7C").replace(" ", "%20")
         url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={encoded_symbol}"
@@ -348,10 +376,14 @@ def get_spot_price():
     except:
         return None
 
-
+# ==================== FIXED: GET LIVE OI ====================
 
 def get_live_oi_from_quotes(instrument_keys):
-    """Get live OI"""
+    """
+    FIXED: Correct OI interpretation
+    - High CE OI = Bullish (more call buying)
+    - High PE OI = Bearish (more put buying)
+    """
     if not instrument_keys:
         return None, 0, 0
     
@@ -392,22 +424,19 @@ def get_live_oi_from_quotes(instrument_keys):
     if ce_oi_total == 0 and pe_oi_total == 0:
         return None, 0, 0
     
-    if pe_oi_total > ce_oi_total * 1.05:
+    # FIXED: Correct interpretation
+    if ce_oi_total > pe_oi_total * 1.05:
         trend = "Bullish"
-    elif ce_oi_total > pe_oi_total * 1.05:
+    elif pe_oi_total > ce_oi_total * 1.05:
         trend = "Bearish"
     else:
         trend = "Sideways"
     
     return trend, ce_oi_total, pe_oi_total
 
-
-
 # ==================== INDICATORS ====================
 
-
 def calculate_vwap_rsi(df):
-    """Calculate VWAP and RSI"""
     df["TP"] = (df["high"] + df["low"] + df["close"]) / 3
     df["TPV"] = df["TP"] * df["volume"]
     df["Cumulative_TPV"] = df["TPV"].cumsum()
@@ -427,13 +456,9 @@ def calculate_vwap_rsi(df):
     
     return df
 
-
-
 # ==================== STRIKE & PREMIUM ====================
 
-
 def get_current_premium(instrument_key):
-    """Get current premium"""
     quote_url = f"https://api.upstox.com/v2/market-quote/quotes?instrument_key={instrument_key}"
     headers = {"accept": "application/json", "Authorization": f"Bearer {ACCESS_TOKEN}"}
     
@@ -455,11 +480,8 @@ def get_current_premium(instrument_key):
     except:
         return None
 
-
-
 def find_atm_strike_and_premium(spot_price, option_type):
-    """Find ATM strike and premium"""
-    global contracts_cache, current_expiry_date
+    global contracts_cache
     
     try:
         strikes = [c for c in contracts_cache if c.get("instrument_type") == option_type]
@@ -481,13 +503,10 @@ def find_atm_strike_and_premium(spot_price, option_type):
     except:
         return None, None, None
 
-
-
 # ==================== SIGNAL LOGIC ====================
 
-
 def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend):
-    """Check signal conditions"""
+    """Check signal conditions with fixed OI logic"""
     conditions = {
         "CE": {
             "price_above_open": spot > day_open,
@@ -511,18 +530,14 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend):
     
     return None, conditions
 
-
-
 # ==================== DISPLAY ====================
 
-
 def print_startup_banner():
-    """Print startup banner"""
     session_time = dt.datetime.now().strftime('%Y-%m-%d %I:%M:%S %p')
     
     banner = f"""
 {'=' * 85}
-🚀 NIFTY 50 OPTIONS INTRADAY TRADING BOT
+🚀 NIFTY 50 OPTIONS INTRADAY TRADING BOT - FIXED V3
 {'=' * 85}
 Strategy:    Day's Open + VWAP + RSI + OI Confirmation
 Timeframe:   5-Minute Candles (1-min resampled)
@@ -534,6 +549,9 @@ Terminal Log: {TERMINAL_LOG_FILE}
 Expiry:      {current_expiry_date} (Tuesday)
 Lot Size:    {LOT_SIZE} quantity
 Take Profit: ₹{TAKE_PROFIT} | Stop Loss: ₹{STOP_LOSS} | Trail: ₹{TRAILING_STOP}
+
+✅ FIXED: OI Logic (CE high = Bullish, PE high = Bearish)
+✅ FIXED: Day's Open (from 9:15 AM candle - ACTUAL today's open)
 {'=' * 85}
 
 ⏰ Bot started. Monitoring live market data...
@@ -541,10 +559,7 @@ Press Ctrl+C to stop.
 """
     logger.info(banner)
 
-
-
 def print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe):
-    """Display market state"""
     snapshot = f"""
 📊 MARKET SNAPSHOT
 {'-' * 85}
@@ -555,10 +570,7 @@ def print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe):
     
     logger.info(snapshot)
 
-
-
 def print_signal_evaluation(conditions):
-    """Display signal evaluation"""
     ce = conditions["CE"]
     pe = conditions["PE"]
     
@@ -573,10 +585,7 @@ def print_signal_evaluation(conditions):
     
     logger.info(evaluation)
 
-
-
 def print_trade_alert(timestamp, signal, strike, premium, spot):
-    """Print trade alert"""
     alert = f"""
 {'=' * 85}
 🔔 TRADE SIGNAL GENERATED!
@@ -594,13 +603,9 @@ def print_trade_alert(timestamp, signal, strike, premium, spot):
     
     logger.info(alert)
 
-
-
 # ==================== LOGGING ====================
 
-
 def log_trade_to_csv(timestamp, signal, strike, premium, spot, rsi, vwap, day_open, oi_trend, exit_reason=None, pnl=None, premium_diff=None):
-    """Log trade to CSV with UTF-8 encoding"""
     with open(CSV_FILE, "a", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -611,16 +616,11 @@ def log_trade_to_csv(timestamp, signal, strike, premium, spot, rsi, vwap, day_op
             round(premium_diff, 2) if premium_diff else ""
         ])
 
-
-
 # ==================== MAIN LOOP ====================
 
-
 def main():
-    """Main trading bot loop"""
-    global last_signal_time, open_position
+    global last_signal_time, open_position, days_open_cache
     
-    # Initialize CSV with UTF-8 encoding
     with open(CSV_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -631,7 +631,6 @@ def main():
     
     logger.info("CSV file initialized: " + CSV_FILE)
     
-    # Get option instruments
     logger.info("\n📥 Initializing...")
     option_instruments = get_option_instruments()
     
@@ -654,7 +653,6 @@ def main():
             logger.info(f"⏰ [{now.strftime('%d-%b-%Y %I:%M:%S %p')}] Iteration #{iteration}")
             logger.info("=" * 85)
             
-            # Market hours
             if now.hour < 9 or (now.hour == 9 and now.minute < 15):
                 logger.info("⏸  Market not open yet (Opens 9:15 AM)")
                 time.sleep(60)
@@ -663,7 +661,6 @@ def main():
             if (now.hour == 15 and now.minute > 30) or now.hour > 15:
                 logger.info("⏸  Market Closed (Closes 3:30 PM)")
                 
-                # Close position at market close
                 if open_position:
                     current_premium = get_current_premium(open_position.instrument_key)
                     if current_premium:
@@ -689,12 +686,13 @@ def main():
                         
                         open_position = None
                 
+                # Reset day's open cache for next day
+                days_open_cache = None
                 time.sleep(60)
                 continue
             
             logger.info("\n📥 Fetching live data from NSE...")
             
-            # Monitor open position
             if open_position:
                 logger.info(f"\n💼 OPEN POSITION: {open_position.signal_type} {open_position.strike}")
                 logger.info(f"   Entry: ₹{open_position.entry_premium:.2f} | Lot: {LOT_SIZE}")
@@ -748,7 +746,14 @@ def main():
                 time.sleep(60)
                 continue
             
-            # Look for new signals
+            # FIXED: Get day's open from 9:15 AM candle
+            day_open = get_days_open_from_intraday()
+            
+            if day_open is None:
+                logger.warning("⚠️  Could not fetch day's open. Retrying in 60s...")
+                time.sleep(60)
+                continue
+            
             df = fetch_live_spot_candles(NIFTY_SYMBOL)
             if df is None or len(df) == 0:
                 logger.warning("\n❌ Failed to fetch candles. Retrying in 60s...")
@@ -759,7 +764,6 @@ def main():
             
             latest = df.iloc[-1]
             spot = latest["close"]
-            day_open = df.iloc[0]["open"]
             vwap = latest["VWAP"]
             rsi = latest["RSI"]
             
@@ -831,8 +835,6 @@ def main():
     
     except Exception as e:
         logger.critical(f"\n\n❌ CRITICAL ERROR: {e}", exc_info=True)
-
-
 
 if __name__ == "__main__":
     main()
