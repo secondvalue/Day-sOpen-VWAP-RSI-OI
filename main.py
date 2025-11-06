@@ -148,7 +148,7 @@ def send_discord_alert(title, description, color=0x00ff00, fields=None):
         "description": description,
         "color": color,
         "timestamp": get_now_kolkata().astimezone(dt.timezone.utc).isoformat(),
-        "footer": {"text": f"Nifty Bot | Lot: {LOT_SIZE}"}
+        "footer": {"text": f"Day's Open | Lot: {LOT_SIZE}"}
     }
     if fields:
         embed["fields"] = fields
