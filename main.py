@@ -20,7 +20,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ==================== CONFIGURATION ====================
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTFiZWExZWVmNjIyNjBhYTYwNDJjOTEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MzQzNzA4NiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYzNTAzMjAwfQ.y1eTA0amnpZwi7kThkqS0lpH5CVKY56Bp1IQfkfe1d8"        # <<-- Replace with your Upstox API token
+ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTFkM2I2ZGQ1NDYwNjE5Yjk2Yzg1ODUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc2MzUyMzQzNywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzYzNTg5NjAwfQ.lvhpbehSouVY6p2_YIhFZujfrRFbKlkxEBhFDO9KH-4"        # <<-- Replace with your Upstox API token
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"  # <<-- Optional, leave blank if unused
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
