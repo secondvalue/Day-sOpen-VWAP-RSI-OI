@@ -1,13 +1,15 @@
 """
-NIFTY 50 OPTIONS INTRADAY TRADING BOT - FIXED VERSION V4.1 (TUESDAY EXPIRY)
+NIFTY 50 OPTIONS INTRADAY TRADING BOT - V5.0 LIVE TRADING (TUESDAY EXPIRY)
+- ✅ LIVE ORDER EXECUTION via Upstox API
 - OI interpretation corrected (PE > CE => Bullish; CE > PE => Bearish)
 - OI delta confirmation (Strong Bullish / Strong Bearish)
 - VWAP per day, explicit 09:15 open candle, robust RSI
 - NIFTY expiry fixed to TUESDAY
-- No environment variables — direct Python config (replace placeholders)
+- Paper trading mode available (set LIVE_TRADING = False)
 """
 
 import os
+import sys
 import requests
 import pandas as pd
 import numpy as np
@@ -20,16 +22,36 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # ==================== CONFIGURATION ====================
-ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTg1NjIwMzJjZTdiODdhOTAyZWNmMzEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDM0OTA1OSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwNDE1MjAwfQ.WkHZKmMqd6pWWzatSG_10kr9CWQz94r9vthxmxqXYbo"        # <<-- Replace with your Upstox API token
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"  # <<-- Optional, leave blank if unused
+# Dual token support: Use SANDBOX token for testing, LIVE token for production
+SANDBOX_ACCESS_TOKEN = ""  # <<-- Add your SANDBOX token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTg1NjIwMzJjZTdiODdhOTAyZWNmMzEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDM0OTA1OSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwNDE1MjAwfQ.WkHZKmMqd6pWWzatSG_10kr9CWQz94r9vthxmxqXYbo"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+DISCORD_WEBHOOK_URL = ""  # <<-- Add your Discord webhook URL here (optional)
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
+# ==================== LIVE TRADING SETTINGS ====================
+SANDBOX_MODE = False        # <<-- SET TO True FOR SANDBOX TESTING, False for live trading
+LIVE_TRADING = True       # <<-- SET TO True FOR REAL ORDER EXECUTION, False for paper trading
+# Auto-select token based on trading mode
+ACCESS_TOKEN = LIVE_ACCESS_TOKEN if LIVE_TRADING else SANDBOX_ACCESS_TOKEN
+
+# API endpoints - automatically set based on SANDBOX_MODE
+if SANDBOX_MODE:
+    ORDER_PLACE_URL = "https://api-sandbox.upstox.com/v3/order/place"
+    ORDER_CANCEL_URL = "https://api-sandbox.upstox.com/v3/order/cancel"
+else:
+    ORDER_PLACE_URL = "https://api-hft.upstox.com/v3/order/place"
+    ORDER_CANCEL_URL = "https://api-hft.upstox.com/v3/order/cancel"
+
 SIGNAL_COOLDOWN = 300     # seconds
-LOT_SIZE = 75
-TAKE_PROFIT = 1000
+LOT_SIZE = 65             # NIFTY 50 lot size
+TAKE_PROFIT = 500         # Start trailing when profit reaches ₹500
 STOP_LOSS = 1500
-TRAILING_STOP = 500
+TRAILING_STOP = 200       # Trail every ₹200
 MIN_5MIN_BARS = 1
+
+# ==================== POLLING INTERVALS ====================
+SIGNAL_CHECK_INTERVAL = 60    # seconds - interval when waiting for signals
+POSITION_MONITOR_INTERVAL = 1 # seconds - interval when position is open (faster for trailing)
 
 TRADE_LOGS_DIR = "trade_logs"
 TERMINAL_LOGS_DIR = "terminal_logs"
@@ -59,6 +81,8 @@ contracts_cache = []
 open_position = None
 days_open_cache = None
 last_oi_snapshot = {'ce': 0, 'pe': 0}
+trade_completed_today = False   # One trade per day limit
+last_failed_order_time = None   # Track when last order failed to prevent spam
 
 # ==================== HTTP SESSION ====================
 session = requests.Session()
@@ -67,7 +91,238 @@ adapter = HTTPAdapter(max_retries=retries)
 session.mount('https://', adapter)
 session.mount('http://', adapter)
 
+# ==================== LIVE ORDER EXECUTION ====================
+def place_order(instrument_key, transaction_type, quantity, order_tag="ALGO_BOT"):
+    """
+    Place a live order via Upstox API.
+    
+    Args:
+        instrument_key: The instrument to trade (e.g., 'NFO_OPT|...')
+        transaction_type: 'BUY' or 'SELL'
+        quantity: Number of shares/lots to trade
+        order_tag: Custom tag for order identification
+    
+    Returns:
+        (success: bool, order_id: str or None, message: str)
+    """
+    if not LIVE_TRADING:
+        logger.info(f"  📝 [PAPER TRADE] {transaction_type} {quantity} of {instrument_key}")
+        return True, f"PAPER_{int(time.time())}", "Paper trade logged"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+    
+    payload = {
+        "quantity": quantity,
+        "product": "I",                    # Intraday
+        "validity": "DAY",
+        "price": 0,                        # Market order
+        "tag": order_tag,
+        "instrument_token": instrument_key,
+        "order_type": "MARKET",
+        "transaction_type": transaction_type,
+        "disclosed_quantity": 0,
+        "trigger_price": 0,
+        "is_amo": False,
+        "slice": False                     # Disable auto-slicing for V3 API
+    }
+    
+    try:
+        logger.info(f"  🔄 Placing {transaction_type} order for {quantity} qty...")
+        r = session.post(ORDER_PLACE_URL, json=payload, headers=headers, timeout=15)
+        response_data = r.json()
+        
+        if r.status_code == 200 and response_data.get('status') == 'success':
+            data = response_data.get('data', {})
+            # V3 API returns order_ids array, V2 returns order_id
+            order_ids = data.get('order_ids', [])
+            order_id = order_ids[0] if order_ids else data.get('order_id')
+            logger.info(f"  ✅ ORDER PLACED: {transaction_type} | Order ID: {order_id}")
+            return True, order_id, "Order placed successfully"
+        else:
+            error_msg = response_data.get('message', response_data.get('errors', 'Unknown error'))
+            logger.error(f"  ❌ ORDER FAILED: {error_msg}")
+            return False, None, str(error_msg)
+            
+    except requests.exceptions.Timeout:
+        logger.error("  ❌ ORDER TIMEOUT: Request timed out")
+        return False, None, "Request timeout"
+    except Exception as e:
+        logger.error(f"  ❌ ORDER ERROR: {e}")
+        return False, None, str(e)
+
+def exit_position(position):
+    """
+    Exit an open position by placing a SELL order.
+    
+    Args:
+        position: The Position object to close
+    
+    Returns:
+        (success: bool, order_id: str or None, message: str)
+    """
+    return place_order(
+        instrument_key=position.instrument_key,
+        transaction_type="SELL",
+        quantity=position.lot_size,
+        order_tag=f"EXIT_{position.signal_type.replace(' ', '_')}"
+    )
+
+def place_sl_order(instrument_key, quantity, trigger_price, order_tag="SL_ORDER"):
+    """
+    Place a Stop Loss Limit (SL) order on the exchange.
+    This order will automatically trigger when price hits the trigger_price.
+    
+    Args:
+        instrument_key: The instrument to trade
+        quantity: Number to sell when SL triggers
+        trigger_price: Price at which SL will trigger
+        order_tag: Custom tag for identification
+    
+    Returns:
+        (success: bool, order_id: str or None, message: str)
+    """
+    if not LIVE_TRADING:
+        logger.info(f"  📝 [PAPER TRADE] SL Order: SELL {quantity} @ trigger ₹{trigger_price:.2f}")
+        return True, f"PAPER_SL_{int(time.time())}", "Paper SL order logged"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+    
+    # For SL (Stop Loss Limit), we need both trigger_price and limit_price
+    # Limit price is set slightly below trigger to ensure execution
+    # SAFETY: Ensure limit_price is always positive (minimum ₹0.05)
+    limit_price = max(0.05, round(trigger_price - 2.0, 2))  # ₹2 below trigger, but never negative
+    
+    payload = {
+        "quantity": quantity,
+        "product": "I",                    # Intraday
+        "validity": "DAY",
+        "price": limit_price,              # Limit price for SL order
+        "tag": order_tag,
+        "instrument_token": instrument_key,
+        "order_type": "SL",                # Stop Loss Limit (not SL-M)
+        "transaction_type": "SELL",
+        "disclosed_quantity": 0,
+        "trigger_price": round(trigger_price, 2),
+        "is_amo": False,
+        "slice": False                     # Disable auto-slicing for V3 API
+    }
+    
+    try:
+        logger.info(f"  🛡️ Placing SL order: Trigger @ ₹{trigger_price:.2f}, Limit @ ₹{limit_price:.2f}...")
+        r = session.post(ORDER_PLACE_URL, json=payload, headers=headers, timeout=15)
+        response_data = r.json()
+        
+        if r.status_code == 200 and response_data.get('status') == 'success':
+            data = response_data.get('data', {})
+            # V3 API returns order_ids array, V2 returns order_id
+            order_ids = data.get('order_ids', [])
+            order_id = order_ids[0] if order_ids else data.get('order_id')
+            logger.info(f"  ✅ SL ORDER PLACED: Trigger @ ₹{trigger_price:.2f} | Order ID: {order_id}")
+            return True, order_id, "SL order placed successfully"
+        else:
+            error_msg = response_data.get('message', response_data.get('errors', 'Unknown error'))
+            logger.error(f"  ❌ SL ORDER FAILED: {error_msg}")
+            return False, None, str(error_msg)
+            
+    except Exception as e:
+        logger.error(f"  ❌ SL ORDER ERROR: {e}")
+        return False, None, str(e)
+
+def cancel_order(order_id):
+    """
+    Cancel an existing order on the exchange.
+    
+    Args:
+        order_id: The order ID to cancel
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    if not LIVE_TRADING:
+        logger.info(f"  📝 [PAPER TRADE] Cancel order: {order_id}")
+        return True, "Paper order cancelled"
+    
+    if not order_id or order_id.startswith("PAPER"):
+        return True, "No real order to cancel"
+    
+    cancel_url = f"{ORDER_CANCEL_URL}?order_id={order_id}"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+    
+    try:
+        logger.info(f"  🚫 Cancelling order: {order_id}...")
+        r = session.delete(cancel_url, headers=headers, timeout=15)
+        response_data = r.json()
+        
+        if r.status_code == 200 and response_data.get('status') == 'success':
+            logger.info(f"  ✅ ORDER CANCELLED: {order_id}")
+            return True, "Order cancelled successfully"
+        else:
+            error_msg = response_data.get('message', response_data.get('errors', 'Unknown error'))
+            logger.warning(f"  ⚠️ CANCEL FAILED: {error_msg}")
+            return False, str(error_msg)
+            
+    except Exception as e:
+        logger.error(f"  ❌ CANCEL ERROR: {e}")
+        return False, str(e)
+
 # ==================== HELPERS ====================
+def check_order_status(order_id):
+    """
+    Check the status of an order by ID via Upstox API.
+    Returns: status string (e.g., 'complete', 'rejected', 'open', 'cancelled') or None
+    """
+    if not LIVE_TRADING or not order_id or str(order_id).startswith("PAPER"):
+        return "complete"
+
+    # Use order history or details endpoint
+    url = "https://api.upstox.com/v2/order/retrieve-order-details"
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ACCESS_TOKEN}"
+    }
+    params = {"order_id": order_id}
+
+    try:
+        r = session.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            # The API usually returns a list of history for the order (updates).
+            # We want the latest status.
+            order_history = data.get('data', [])
+            if order_history:
+                # Sort by timestamp usually, or just take the first/last? 
+                # Upstox order details usually returns the lifecycle. The 'status' field in the latest entry is what we want.
+                # If it's a list, look at the latest element or the one with 'order_id' matching?
+                # Actually, /retrieve-order-details returns a list of updates for that specific order.
+                # The latest update should be at index 0 or -1. Let's assume the status of the order is in the 'status' field of the latest update.
+                # However, to be safe, let's use the 'order/history' endpoint which lists all orders with their *current* status if we don't pass order_id?
+                # No, retrieve-order-details is specific.
+                # Let's check `status` key in the first item if it's the current state.
+                # Logic: iterate and find 'rejected', 'cancelled', 'complete'.
+                
+                # Simpler approach: check if any update says 'rejected'
+                for entry in order_history:
+                    s = str(entry.get('status') or '').lower()
+                    if s in ('rejected', 'cancelled', 'complete', 'open', 'trigger pending'):
+                        return s
+                return str(order_history[0].get('status') or '').lower()
+    except Exception as e:
+        logger.error(f"  ❌ Check Order Status Error: {e}")
+        pass
+        
+    return None
+
 def encode_symbol(sym): return sym.replace('|', '%7C').replace(' ', '%20')
 def get_now_kolkata(): return dt.datetime.now(tz=KOLKATA)
 
@@ -103,7 +358,7 @@ def get_rsi_label(rsi):
 
 # ==================== POSITION CLASS ====================
 class Position:
-    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp):
+    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp, entry_order_id=None):
         self.signal_type = signal_type
         self.strike = strike
         self.entry_premium = float(entry_premium)
@@ -113,6 +368,10 @@ class Position:
         self.highest_pnl = 0
         self.trailing_stop_active = False
         self.trailing_stop_price = None
+        self.entry_order_id = entry_order_id    # Track entry order ID
+        self.exit_order_id = None                # Track exit order ID
+        self.sl_order_id = None                  # Track SL order ID on exchange
+        self.sl_trigger_price = None             # SL trigger price
 
     def calculate_pnl(self, current_premium):
         diff = current_premium - self.entry_premium
@@ -185,32 +444,53 @@ def get_option_instruments():
     url = f"https://api.upstox.com/v2/option/contract?instrument_key={encoded_symbol}&expiry_date={current_expiry_date}"
     headers = {"accept": "application/json", "Authorization": f"Bearer {ACCESS_TOKEN}"}
     try:
+        logger.info(f"Fetching option instruments for {current_expiry_date}...")
         r = session.get(url, headers=headers, timeout=10)
+        logger.info(f"API Response Status: {r.status_code}")
+        
         if r.status_code == 200:
             data = r.json()
             contracts_cache = data.get('data') or []
+            logger.info(f"Fetched {len(contracts_cache)} contracts for {current_expiry_date}")
+        else:
+            logger.error(f"API returned status {r.status_code}: {r.text[:200]}")
+            
         if not contracts_cache:
+            logger.warning(f"No contracts for {current_expiry_date}, fetching all expiries...")
             url2 = f"https://api.upstox.com/v2/option/contract?instrument_key={encoded_symbol}"
             r2 = session.get(url2, headers=headers, timeout=10)
+            logger.info(f"All expiries API Status: {r2.status_code}")
+            
             if r2.status_code == 200:
                 data2 = r2.json()
                 all_contracts = data2.get('data') or []
+                logger.info(f"Total contracts available: {len(all_contracts)}")
+                
                 if all_contracts:
                     expiries = sorted(set([c.get('expiry') for c in all_contracts if c.get('expiry')]))
+                    logger.info(f"Available expiries: {expiries[:5]}")
                     if expiries:
                         nearest = expiries[0]
                         current_expiry_date = nearest
                         contracts_cache = [c for c in all_contracts if c.get('expiry') == nearest]
+                        logger.info(f"Using nearest expiry: {nearest} ({len(contracts_cache)} contracts)")
+            else:
+                logger.error(f"All expiries API failed: {r2.status_code}: {r2.text[:200]}")
+                
         if not contracts_cache:
+            logger.error("No contracts found after all attempts!")
             return []
+            
         spot = get_spot_price()
         if spot is not None:
             filtered = [c.get('instrument_key') for c in contracts_cache if c.get('instrument_key') and abs(c.get('strike_price', 0) - spot) <= 500]
+            logger.info(f"Filtered to {len(filtered)} contracts near spot price {spot}")
             return filtered if filtered else [c.get('instrument_key') for c in contracts_cache[:50] if c.get('instrument_key')]
         else:
+            logger.warning("Could not get spot price, returning first 50 contracts")
             return [c.get('instrument_key') for c in contracts_cache[:50] if c.get('instrument_key')]
     except Exception as e:
-        logger.error(f"  ❌ Option instruments error: {e}")
+        logger.error(f"  ❌ Option instruments error: {e}", exc_info=True)
         return []
 
 def get_current_premium(instrument_key):
@@ -412,10 +692,17 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation
 # ==================== DISPLAY & LOGGING ====================
 def print_startup_banner():
     session_time = get_now_kolkata().strftime('%Y-%m-%d %I:%M:%S %p')
+    trading_mode = "🔴 LIVE TRADING" if LIVE_TRADING else "📝 PAPER TRADING"
+    sandbox_status = "🧪 SANDBOX MODE ENABLED" if SANDBOX_MODE else ""
+    if SANDBOX_MODE:
+        logger.info(f"\n{'=' * 85}")
+        logger.info("🧪 SANDBOX MODE ENABLED - Using test environment (V3 API)")
+        logger.info(f"{'=' * 85}\n")
     banner = f"""
 {'=' * 85}
-🚀 NIFTY 50 OPTIONS INTRADAY TRADING BOT - PATCHED V4.1
+🚀 NIFTY 50 OPTIONS INTRADAY TRADING BOT - V5.0 LIVE EXECUTION
 {'=' * 85}
+Mode:        {trading_mode}{' | ' + sandbox_status if sandbox_status else ''}
 Strategy:    Day's Open + VWAP + RSI + OI + OI-Delta Confirmation
 Timeframe:   5-Minute Candles (1-min resampled)
 Data Source: Live from NSE via Upstox API
@@ -425,11 +712,13 @@ Terminal Log: {TERMINAL_LOG_FILE}
 Expiry:      {current_expiry_date}
 Lot Size:    {LOT_SIZE} quantity
 Take Profit: ₹{TAKE_PROFIT} | Stop Loss: ₹{STOP_LOSS} | Trail: ₹{TRAILING_STOP}
+Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
+Trade Limit: 1 trade per day
+Protection:  Exchange Limit Orders (SL) + Software Backup
 
-✅ FIXED: OI Interpretation (PE>CE => Bullish; CE>PE => Bearish)
-✅ NEW: OI Δ Confirmation
-✅ FIXED: Day's Open (explicit 09:15 candle)
-✅ FIXED: RSI & VWAP calculation robustness
+✅ NEW: Live Order Execution via Upstox API
+✅ NEW: Exchange Stop Loss Protection
+✅ NEW: One trade per day limit
 {'=' * 85}
 """
     logger.info(banner)
@@ -573,7 +862,7 @@ def fetch_live_spot_candles(symbol):
 
 # ==================== MAIN LOOP ====================
 def main():
-    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache
+    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache, trade_completed_today
 
     with open(CSV_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -621,6 +910,23 @@ def main():
                         timestamp = now.strftime('%Y-%m-%d %I:%M:%S %p')
 
                         logger.info("\n💼 CLOSING POSITION AT MARKET CLOSE")
+                        
+                        # ===== CANCEL SL ORDER FIRST =====
+                        if open_position.sl_order_id:
+                            cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
+                            if cancel_success:
+                                logger.info(f"  🚫 SL ORDER CANCELLED (market close)")
+                        # =================================
+                        
+                        # ===== LIVE ORDER: EXIT AT MARKET CLOSE =====
+                        exit_success, exit_order_id, exit_msg = exit_position(open_position)
+                        if exit_success:
+                            open_position.exit_order_id = exit_order_id
+                            logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
+                        else:
+                            logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
+                        # ============================================
+                        
                         logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
 
                         log_trade_to_csv(timestamp, f"EXIT {open_position.signal_type}", open_position.strike,
@@ -633,39 +939,81 @@ def main():
                             [
                                 {"name": "Entry", "value": f"₹{open_position.entry_premium:.2f}", "inline": True},
                                 {"name": "Exit", "value": f"₹{current_premium:.2f}", "inline": True},
-                                {"name": "P&L", "value": f"₹{pnl:.2f}", "inline": False}
+                                {"name": "P&L", "value": f"₹{pnl:.2f}", "inline": False},
+                                {"name": "Order ID", "value": str(exit_order_id or "N/A"), "inline": True}
                             ]
                         )
 
                         open_position = None
 
                 days_open_cache = None
+                trade_completed_today = False  # Reset for next day
                 time.sleep(60)
                 continue
 
-            # If position open - manage
+            # If position open - manage with fast 1-second polling
             if open_position:
-                logger.info(f"\n💼 OPEN POSITION: {open_position.signal_type} {open_position.strike}")
-                logger.info(f"   Entry: ₹{open_position.entry_premium:.2f} | Lot: {LOT_SIZE}")
+                # Initialize position monitoring counter if not exists
+                if not hasattr(open_position, 'monitor_count'):
+                    open_position.monitor_count = 0
+                open_position.monitor_count += 1
+                
+                # Log detailed status every 10 seconds (every 10th check)
+                verbose_log = (open_position.monitor_count % 10 == 1)
+                
+                if verbose_log:
+                    logger.info(f"\n💼 OPEN POSITION: {open_position.signal_type} {open_position.strike}")
+                    logger.info(f"   Entry: ₹{open_position.entry_premium:.2f} | Lot: {LOT_SIZE}")
 
                 current_premium = get_current_premium(open_position.instrument_key)
                 if current_premium:
                     pnl, premium_diff = open_position.calculate_pnl(current_premium)
 
-                    logger.info(f"   Current: ₹{current_premium:.2f} | Diff: ₹{premium_diff:.2f}")
-                    logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
-
-                    if open_position.trailing_stop_active:
-                        logger.info(f"   🎯 Trailing Stop: ₹{open_position.trailing_stop_price:.2f}")
+                    if verbose_log:
+                        logger.info(f"   Current: ₹{current_premium:.2f} | Diff: ₹{premium_diff:.2f}")
+                        logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
+                        if open_position.trailing_stop_active:
+                            logger.info(f"   🎯 Trailing Stop: ₹{open_position.trailing_stop_price:.2f}")
+                    else:
+                        # Compact single-line status for 1-second updates
+                        trail_info = f" | Trail: ₹{open_position.trailing_stop_price:.2f}" if open_position.trailing_stop_active else ""
+                        print(f"\r   ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}    ", end="", flush=True)
 
                     should_exit, exit_reason, final_pnl, final_premium_diff = open_position.check_exit(current_premium)
 
                     if should_exit:
+                        print()  # New line after compact updates
                         timestamp = now.strftime('%Y-%m-%d %I:%M:%S %p')
 
                         logger.info("\n" + "="*85)
                         logger.info(f"🔔 POSITION CLOSED: {exit_reason}")
                         logger.info("="*85)
+                        
+                        # ===== CANCEL SL ORDER IF EXISTS (for trailing stop exit) =====
+                        if open_position.sl_order_id and "STOP LOSS" not in exit_reason:
+                            # Cancel SL order before placing exit (trailing stop exit)
+                            cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
+                            if cancel_success:
+                                logger.info(f"  🚫 SL ORDER CANCELLED (trailing exit)")
+                            else:
+                                logger.warning(f"  ⚠️ SL Cancel failed (may have already triggered): {cancel_msg}")
+                        # ============================================================
+                        
+                        # ===== LIVE ORDER: EXIT AT SL/TP/TRAILING =====
+                        # Only place exit order if SL didn't trigger on exchange
+                        if "STOP LOSS" not in exit_reason or not open_position.sl_order_id:
+                            exit_success, exit_order_id, exit_msg = exit_position(open_position)
+                            if exit_success:
+                                open_position.exit_order_id = exit_order_id
+                                logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
+                            else:
+                                logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
+                        else:
+                            # SL triggered on exchange - no need to place exit order
+                            logger.info(f"  ✅ SL ORDER TRIGGERED ON EXCHANGE")
+                            exit_order_id = open_position.sl_order_id
+                        # ==============================================
+                        
                         logger.info(f"  Entry:       ₹{open_position.entry_premium:.2f}")
                         logger.info(f"  Exit:        ₹{current_premium:.2f}")
                         logger.info(f"  Premium Diff: ₹{final_premium_diff:.2f}")
@@ -683,14 +1031,17 @@ def main():
                             [
                                 {"name": "Entry", "value": f"₹{open_position.entry_premium:.2f}", "inline": True},
                                 {"name": "Exit", "value": f"₹{current_premium:.2f}", "inline": True},
-                                {"name": "P&L", "value": f"₹{final_pnl:.2f}", "inline": False}
+                                {"name": "P&L", "value": f"₹{final_pnl:.2f}", "inline": False},
+                                {"name": "Order ID", "value": str(exit_order_id or "N/A"), "inline": True}
                             ]
                         )
 
                         open_position = None
                         last_signal_time = now
+                        trade_completed_today = True  # One trade per day - done for today
+                        logger.info("  📅 Daily trade limit reached - No more trades today")
 
-                time.sleep(60)
+                time.sleep(POSITION_MONITOR_INTERVAL)  # 1 second polling when position is open
                 continue
 
             # Normal flow: get day's open and market data
@@ -728,8 +1079,14 @@ def main():
 
             print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe)
 
+            # Check if daily trade limit reached
+            if trade_completed_today:
+                logger.info("\n📅 DAILY TRADE COMPLETED - Monitoring only, no new trades today")
+                time.sleep(SIGNAL_CHECK_INTERVAL)
+                continue
+
             if last_signal_time:
-                elapsed = (now - last_signal_time).seconds
+                elapsed = (now - last_signal_time).total_seconds()
                 if elapsed < SIGNAL_COOLDOWN:
                     remaining = SIGNAL_COOLDOWN - elapsed
                     logger.info(f"\n⏳ COOLDOWN ACTIVE: {remaining}s remaining until next signal")
@@ -747,8 +1104,108 @@ def main():
                     timestamp = now.strftime('%Y-%m-%d %I:%M:%S %p')
 
                     print_trade_alert(timestamp, signal, strike, premium, spot)
+                    
+                    # ===== LIVE ORDER: ENTRY BUY =====
+                    order_success, order_id, order_msg = place_order(
+                        instrument_key=instrument_key,
+                        transaction_type="BUY",
+                        quantity=LOT_SIZE,
+                        order_tag=f"ENTRY_{signal.replace(' ', '_')}"
+                    )
+                    
+                    if not order_success:
+                        logger.error(f"  ❌ ENTRY ORDER FAILED: {order_msg}")
+                        logger.error("  🛑 CRITICAL: Order placement failed")
+                        logger.error("  🚫 BOT STOPPED - Manual intervention required")
+                        logger.error("  💡 Please check: 1) Sufficient funds 2) Valid token 3) Market hours")
+                        send_discord_alert(
+                            "🛑 Bot Stopped - Order Failed",
+                            f"Entry order failed: {order_msg}\n\nBot has been stopped. Please fix the issue and restart manually.",
+                            0xff0000
+                        )
+                        logger.info("\n" + "="*85)
+                        logger.info("⏹️  BOT STOPPED DUE TO ORDER FAILURE")
+                        logger.info("="*85)
+                        sys.exit(1)  # Exit with error code
+                    
+                    logger.info(f"  ✅ ENTRY ORDER PLACED: {order_id}")
+                    # ==================================
+                    
+                    # Wait for BUY order to fill before placing SL
+                    logger.info("  ⏳ Waiting for BUY order to complete...")
+                    
+                    # CRITICAL SAFETY: Wait for order to be COMPLETE (not just open)
+                    # Retry up to 10 times (10 seconds total) to confirm order completion
+                    entry_status = None
+                    for retry in range(10):
+                        time.sleep(1)
+                        entry_status = check_order_status(order_id)
+                        logger.info(f"  🔍 Entry Order Status (attempt {retry+1}/10): {entry_status}")
+                        
+                        if entry_status == 'complete':
+                            logger.info(f"  ✅ Entry BUY order COMPLETED successfully")
+                            break
+                        elif entry_status in ('rejected', 'cancelled'):
+                            logger.error(f"  ❌ Entry order was {entry_status.upper()}")
+                            break
+                        # If 'open' or 'trigger pending', continue waiting
+                    
+                    # CRITICAL SAFETY: Only proceed if BUY order is COMPLETE
+                    if entry_status != 'complete':
+                        logger.error(f"  ❌ Entry order status is '{entry_status}' (NOT complete).")
+                        logger.error(f"  🚨 CRITICAL: Cannot confirm BUY order execution")
+                        logger.error(f"  🚫 BOT STOPPED to prevent NAKED OPTION SELLING")
+                        logger.error("  💡 Order may have been rejected, cancelled, or still pending")
+                        send_discord_alert(
+                            "🚨 Bot Stopped - Order Not Confirmed",
+                            f"Order {order_id} status: {entry_status}\n\nCannot confirm BUY order completion. Bot stopped to prevent naked selling.\n\nPlease check order status manually and restart bot.",
+                            0xff0000
+                        )
+                        logger.info("\n" + "="*85)
+                        logger.info("⏹️  BOT STOPPED FOR SAFETY")
+                        logger.info("="*85)
+                        sys.exit(1)  # Exit with error code
 
-                    open_position = Position(signal, strike, premium, instrument_key, timestamp)
+                    open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id)
+                    
+                    # ===== LIVE ORDER: PLACE SL ORDER ON EXCHANGE =====
+                    # SAFETY CONFIRMED: We have a completed BUY position (verified above)
+                    # This SL is a SELL order to CLOSE our long position if price drops
+                    # It will sit as "Trigger Pending" until price hits the trigger
+                    logger.info(f"  ✅ BUY position confirmed. Now placing protective SL order...")
+                    
+                    sl_trigger = premium - (STOP_LOSS / LOT_SIZE)
+                    
+                    # CRITICAL FIX: Skip SL order if trigger price would be negative or zero
+                    # This happens when premium is very low (e.g., OTM options near expiry)
+                    # In such cases, max loss (premium paid) is already < STOP_LOSS, so no SL needed
+                    if sl_trigger <= 0:
+                        total_investment = premium * LOT_SIZE
+                        logger.warning(f"  ⚠️ SL trigger would be ₹{sl_trigger:.2f} (INVALID - negative/zero)")
+                        logger.info(f"  ℹ️  Max possible loss: ₹{total_investment:.2f} (premium paid)")
+                        logger.info(f"  ℹ️  Your STOP_LOSS setting: ₹{STOP_LOSS:.2f}")
+                        logger.info(f"  ✅ No SL order needed - Max loss already within risk limit")
+                        logger.info(f"  �️ Software monitoring active - will exit on trailing stop or market close")
+                        open_position.sl_order_id = None
+                        open_position.sl_trigger_price = None
+                    else:
+                        # Normal case: SL trigger is positive, place the order
+                        sl_success, sl_order_id, sl_msg = place_sl_order(
+                            instrument_key=instrument_key,
+                            quantity=LOT_SIZE,
+                            trigger_price=sl_trigger,
+                            order_tag=f"SL_{signal.replace(' ', '_')}"
+                        )
+                        
+                        if sl_success:
+                            open_position.sl_order_id = sl_order_id
+                            open_position.sl_trigger_price = sl_trigger
+                            logger.info(f"  🛡️ SL ORDER ACTIVE on Exchange: Trigger @ ₹{sl_trigger:.2f}")
+                        else:
+                            logger.warning(f"  ⚠️ SL ORDER FAILED: {sl_msg} - Bot will monitor manually")
+                            # Fallback to software monitoring if exchange SL fails
+                            open_position.sl_trigger_price = sl_trigger
+                    # ==================================================
 
                     log_trade_to_csv(timestamp, signal, strike, premium, spot, rsi, vwap, day_open, oi_trend)
 
@@ -759,7 +1216,9 @@ def main():
                         [
                             {"name": "Premium", "value": f"₹{premium:.2f}", "inline": True},
                             {"name": "Spot", "value": f"{spot:.2f}", "inline": True},
-                            {"name": "Investment", "value": f"₹{premium * LOT_SIZE:.2f}", "inline": True}
+                            {"name": "Investment", "value": f"₹{premium * LOT_SIZE:.2f}", "inline": True},
+                            {"name": "Order ID", "value": str(order_id), "inline": True},
+                            {"name": "SL Trigger", "value": f"₹{sl_trigger:.2f}", "inline": True}
                         ]
                     )
 
@@ -769,8 +1228,8 @@ def main():
             else:
                 logger.info("\n⏸  NO SIGNAL - Waiting for all conditions to align...")
 
-            logger.info("\n⏱  Next check in 60 seconds...")
-            time.sleep(60)
+            logger.info(f"\n⏱  Next check in {SIGNAL_CHECK_INTERVAL} seconds...")
+            time.sleep(SIGNAL_CHECK_INTERVAL)
 
     except KeyboardInterrupt:
         logger.info("\n\n" + "="*85)
