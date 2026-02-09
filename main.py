@@ -14,7 +14,7 @@ import requests
 import pandas as pd
 import numpy as np
 import datetime as dt
-import time
+import time  
 import csv
 import logging
 from zoneinfo import ZoneInfo
@@ -30,7 +30,7 @@ NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
 SANDBOX_MODE = False        # <<-- SET TO True FOR SANDBOX TESTING, False for live trading
-LIVE_TRADING = True       # <<-- SET TO True FOR REAL ORDER EXECUTION, False for paper trading
+LIVE_TRADING = True      # <<-- SET TO True FOR REAL ORDER EXECUTION, False for paper trading
 # Auto-select token based on trading mode
 ACCESS_TOKEN = LIVE_ACCESS_TOKEN if LIVE_TRADING else SANDBOX_ACCESS_TOKEN
 
