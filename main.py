@@ -24,7 +24,7 @@ from urllib3.util.retry import Retry
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = ""  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTg1NjIwMzJjZTdiODdhOTAyZWNmMzEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDM0OTA1OSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwNDE1MjAwfQ.WkHZKmMqd6pWWzatSG_10kr9CWQz94r9vthxmxqXYbo"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTg5NTRiMzhmYmNkZjY5MjMwYTA1MzQiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDYwNzc5NSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwNjc0NDAwfQ.k449XFiACvm6P3X2T2AATF_KfCcraPLN9FFkJ_cNgfc"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = ""  # <<-- Add your Discord webhook URL here (optional)
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
