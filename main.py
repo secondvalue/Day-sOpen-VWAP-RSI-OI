@@ -24,12 +24,12 @@ from urllib3.util.retry import Retry
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OThiZjkzNGExZTg3OTYxZjk2MTE1NGEiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDc4MDk4MCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwODQ3MjAwfQ.VekXjtM4Ef2LEdeVXAESQNF-xrRW8F0nOkcQ6tnh7uY"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OThkNGFlM2YyZWViYTY5ODBlNTc4NTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDg2NzQyNywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwOTMzNjAwfQ.ABPrD6J_IBgYq2aAmhHSzvWZ4ZxntZ8asEoK9p5THJE"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
-SANDBOX_MODE = False         # <<-- SET TO True FOR SANDBOX TESTING
+SANDBOX_MODE = True         # <<-- SET TO True FOR SANDBOX TESTING
 LIVE_TRADING = True         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
 
 # Separate tokens for Data (Live) and Orders (Sandbox/Live)
@@ -55,12 +55,12 @@ STOP_LOSS_PCT = 0.10      # Stop loss at 10%
 MIN_SL_POINTS = 10.0      # Minimum SL distance (Safety floor for low premiums)
 
 # Stage 2: Breakeven (Risk-Free)
-BREAKEVEN_TRIGGER_PCT = 0.05  # Move SL to Entry when profit hits 5%
+BREAKEVEN_TRIGGER_PCT = 0.08  # Move SL to Entry when profit hits 8%
 
 # Stage 3: Adaptive Trailing (The Squeeze)
-TIER1_TRAIL_PCT = 0.05    # Loose trail (5%) for normal moves (5-15% profit)
-TIER2_TRIGGER_PCT = 0.15  # Trigger tighter trail after 15% profit
-TIER2_TRAIL_PCT = 0.03    # Tight trail (3%) for big trends >15%
+TIER1_TRAIL_PCT = 0.10    # Loose trail (10%) for normal moves (8-20% profit)
+TIER2_TRIGGER_PCT = 0.20  # Trigger tighter trail after 20% profit
+TIER2_TRAIL_PCT = 0.05    # Tight trail (5%) for big trends >20%
 
 MIN_5MIN_BARS = 1
 
