@@ -20,11 +20,12 @@ import logging
 from zoneinfo import ZoneInfo
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import urllib.parse
 
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OThkNGFlM2YyZWViYTY5ODBlNTc4NTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDg2NzQyNywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcwOTMzNjAwfQ.ABPrD6J_IBgYq2aAmhHSzvWZ4ZxntZ8asEoK9p5THJE"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OThlOWUxM2UyNGM4NDExZmY2NTY0NjAiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDk1NDI1OSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMDIwMDAwfQ.gWyH3z8RBIEDM38I2cycDzNe1gSx6QV9aayycGdcaRs"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
@@ -47,20 +48,13 @@ else:
 
 SIGNAL_COOLDOWN = 300     # seconds
 LOT_SIZE = 65             # NIFTY 50 lot size
-# ==================== ADVANCED RISK MANAGEMENT ====================
-MIN_PREMIUM = 40.0        # Skip trades if premium is below this (Avoid traps)
 
-# Stage 1: Initial Risk
-STOP_LOSS_PCT = 0.10      # Stop loss at 10%
-MIN_SL_POINTS = 10.0      # Minimum SL distance (Safety floor for low premiums)
 
 # Stage 2: Breakeven (Risk-Free)
-BREAKEVEN_TRIGGER_PCT = 0.08  # Move SL to Entry when profit hits 8%
+BREAKEVEN_TRIGGER_PCT = 0.05  # Move SL to Entry when profit hits 5% (Scalping)
 
-# Stage 3: Adaptive Trailing (The Squeeze)
-TIER1_TRAIL_PCT = 0.10    # Loose trail (10%) for normal moves (8-20% profit)
-TIER2_TRIGGER_PCT = 0.20  # Trigger tighter trail after 20% profit
-TIER2_TRAIL_PCT = 0.05    # Tight trail (5%) for big trends >20%
+# Stage 3: Adaptive Trailing (ATR Based)
+# ATR Logic: Initial SL = Entry - 1.5*ATR | Trailing Check = High - 0.5*ATR
 
 MIN_5MIN_BARS = 1
 
@@ -387,93 +381,7 @@ def get_rsi_label(rsi):
     else:
         return "NEUTRAL"
 
-# ==================== POSITION CLASS ====================
-class Position:
-    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp, entry_order_id=None):
-        self.signal_type = signal_type
-        self.strike = strike
-        self.entry_premium = float(entry_premium)
-        self.instrument_key = instrument_key
-        self.timestamp = timestamp
-        self.lot_size = LOT_SIZE
-        self.highest_premium = float(entry_premium) # Track highest price for trailing
-        self.breakeven_active = False           # Track if breakeven is hit
-        self.trailing_stop_active = False
-        self.trailing_stop_price = None
-        self.entry_order_id = entry_order_id    # Track entry order ID
-        self.exit_order_id = None                # Track exit order ID
-        self.sl_order_id = None                  # Track SL order ID on exchange
-        self.sl_trigger_price = None             # SL trigger price
 
-    def calculate_pnl(self, current_premium):
-        diff = current_premium - self.entry_premium
-        pnl = diff * self.lot_size
-        
-        # Track highest premium for trailing calculations
-        if current_premium > self.highest_premium:
-            self.highest_premium = current_premium
-            
-        return pnl, diff
-
-    def check_exit(self, current_premium):
-        pnl, diff = self.calculate_pnl(current_premium)
-        pnl_pct = diff / self.entry_premium
-
-        # --- 1. INITIAL STOP LOSS CHECK ---
-        # Use MAX of (10% OR 10 Points) to prevent whipsaws on low premiums
-        sl_points = max(self.entry_premium * STOP_LOSS_PCT, MIN_SL_POINTS)
-        stop_loss_price = self.entry_premium - sl_points
-        
-        # If Breakeven is active, SL is at Entry Price
-        if self.breakeven_active:
-             stop_loss_price = self.entry_premium
-             
-        # If Trailing is active, SL is at Trailing Price
-        if self.trailing_stop_active and self.trailing_stop_price:
-             stop_loss_price = max(stop_loss_price, self.trailing_stop_price)
-
-        if current_premium <= stop_loss_price:
-            reason = "STOP LOSS"
-            if self.breakeven_active: reason = "BREAKEVEN HIT (Risk-Free)"
-            if self.trailing_stop_active: reason = f"TRAILING STOP (Profit: ₹{pnl:.2f})"
-            return True, reason, pnl, diff
-
-        # --- 2. BREAKEVEN CHECK (Stage 2) ---
-        # Activate if profit > 5% and not already active
-        if pnl_pct >= BREAKEVEN_TRIGGER_PCT and not self.breakeven_active:
-            self.breakeven_active = True
-            logger.info(f"  🛡️ BREAKEVEN ACTIVATED: SL moved to Entry @ ₹{self.entry_premium:.2f}")
-
-        # --- 3. TIERED TRAILING CHECK (Stage 3) ---
-        # Activate trailing logic if above Breakeven
-        if pnl_pct >= BREAKEVEN_TRIGGER_PCT:
-            self.trailing_stop_active = True
-            
-            # Determine Trailing Gap based on Profit Tier
-            if pnl_pct >= TIER2_TRIGGER_PCT:
-                # Tier 2: Aggressive Squeeze (3% gap)
-                trail_gap = self.highest_premium * TIER2_TRAIL_PCT
-                trail_mode = "Tight (3%)"
-            else:
-                # Tier 1: Loose Trail (5% gap)
-                trail_gap = self.highest_premium * TIER1_TRAIL_PCT
-                trail_mode = "Loose (5%)"
-            
-            # Additional Safety: Gap should never be < MIN 5 Points (if applicable, but % usually scales ok)
-            # Let's trust pure % for trailing as price is moving up, but we could add min points if needed.
-            
-            new_trail_price = self.highest_premium - trail_gap
-            
-            # Only move trail UP
-            if self.trailing_stop_price is None or new_trail_price > self.trailing_stop_price:
-                # Ensure we don't move trail BELOW Entry if we are in profit (Breakeven priority)
-                if new_trail_price < self.entry_premium and self.breakeven_active:
-                    new_trail_price = self.entry_premium
-                
-                self.trailing_stop_price = new_trail_price
-                logger.info(f"  📈 Trailing Updated ({trail_mode}): ₹{self.trailing_stop_price:.2f} (Peak: ₹{self.highest_premium:.2f})")
-
-        return False, None, pnl, diff
 
 # ==================== DISCORD ====================
 def send_discord_alert(title, description, color=0x00ff00, fields=None):
@@ -669,6 +577,18 @@ def get_live_oi_from_quotes(instrument_keys):
     return trend, ce_oi_total, pe_oi_total, confirmation
 
 # ==================== INDICATORS ====================
+def calculate_atr(df, period=14):
+    """
+    Calculate Average True Range (ATR) for volatility-based stops.
+    """
+    df = df.copy()
+    df['high_low'] = df['high'] - df['low']
+    df['high_close'] = np.abs(df['high'] - df['close'].shift())
+    df['low_close'] = np.abs(df['low'] - df['close'].shift())
+    df['tr'] = df[['high_low', 'high_close', 'low_close']].max(axis=1)
+    df['ATR'] = df['tr'].rolling(window=period).mean()
+    return df
+
 def calculate_vwap_rsi(df):
     df = df.copy()
     if 'time' in df.columns:
@@ -708,7 +628,7 @@ def calculate_vwap_rsi(df):
     
     df['RSI'] = rsi.fillna(50.0)
 
-    df.drop(columns=['TPV', 'Cumulative_TPV', 'Cumulative_Volume'], errors='ignore', inplace=True)
+    df.drop(columns=['TPV', 'Cumulative_TPV', 'Cumulative_Volume', 'high_low', 'high_close', 'low_close', 'tr'], errors='ignore', inplace=True)
     return df
 
 # ==================== FIND ATM & PREMIUM ====================
@@ -744,6 +664,94 @@ def find_atm_strike_and_premium(spot_price, option_type):
         return atm_strike, 0.0, instrument_key
     except Exception:
         return None, None, None
+
+
+
+# ==================== POSITION CLASS ====================
+class Position:
+    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp, entry_order_id=None, atr=None):
+        self.signal_type = signal_type
+        self.strike = strike
+        self.entry_premium = float(entry_premium)
+        self.instrument_key = instrument_key
+        self.timestamp = timestamp
+        self.lot_size = LOT_SIZE
+        self.highest_premium = float(entry_premium) # Track highest price for trailing
+        self.breakeven_active = False           # Track if breakeven is hit
+        self.trailing_stop_active = False
+        self.trailing_stop_price = None
+        self.entry_order_id = entry_order_id    # Track entry order ID
+        self.exit_order_id = None                # Track exit order ID
+        self.sl_order_id = None                  # Track SL order ID on exchange
+        self.sl_trigger_price = None             # SL trigger price
+        self.atr = atr                          # ATR is now MANDATORY for risk
+
+    def calculate_pnl(self, current_premium):
+        diff = current_premium - self.entry_premium
+        pnl = diff * self.lot_size
+        
+        # Track highest premium for trailing calculations
+        if current_premium > self.highest_premium:
+            self.highest_premium = current_premium
+            
+        return pnl, diff
+
+    def check_exit(self, current_premium):
+        pnl, diff = self.calculate_pnl(current_premium)
+        pnl_pct = diff / self.entry_premium
+
+        # --- 1. INITIAL STOP LOSS CHECK (ATR Only) ---
+        # Safety: If ATR is missing (shouldn't happen with strict check), default to 20 pts?
+        # User requested "ATR Only", so we assume ATR is valid.
+        
+        current_atr = self.atr if self.atr else 10.0 # Fallback should not be reached if strict
+        
+        # Initial SL: Entry - 1.5 * ATR (Scalping Mode)
+        sl_points = current_atr * 1.5
+        stop_loss_price = self.entry_premium - sl_points
+        
+        # If Breakeven is active, SL is at Entry Price
+        if self.breakeven_active:
+             stop_loss_price = self.entry_premium
+             
+        # If Trailing is active, SL is at Trailing Price
+        if self.trailing_stop_active and self.trailing_stop_price:
+             stop_loss_price = max(stop_loss_price, self.trailing_stop_price)
+
+        if current_premium <= stop_loss_price:
+            reason = f"STOP LOSS (ATR: {self.atr:.2f})" if self.atr else "STOP LOSS"
+            if self.breakeven_active: reason = "BREAKEVEN HIT (Risk-Free)"
+            if self.trailing_stop_active: reason = f"TRAILING STOP (Profit: ₹{pnl:.2f})"
+            return True, reason, pnl, diff
+
+        # --- 2. BREAKEVEN CHECK (Stage 2) ---
+        # Activate if profit > 8% (unchanged)
+        if pnl_pct >= BREAKEVEN_TRIGGER_PCT and not self.breakeven_active:
+            self.breakeven_active = True
+            logger.info(f"  🛡️ BREAKEVEN ACTIVATED: SL moved to Entry @ ₹{self.entry_premium:.2f}")
+
+        # --- 3. TRAILING CHECK (ATR Based) ---
+        # Starts trailing immediately or after Breakeven? 
+        # Let's activate trailing once we are above Breakeven to avoid noise
+        if pnl_pct >= BREAKEVEN_TRIGGER_PCT:
+            self.trailing_stop_active = True
+            
+            # Trailing Gap: 0.5 * ATR (Aggressive Scalping Mode)
+            trail_gap = current_atr * 0.5
+            trail_mode = f"ATR ({trail_gap:.2f})"
+
+            new_trail_price = self.highest_premium - trail_gap
+            
+            # Only move trail UP
+            if self.trailing_stop_price is None or new_trail_price > self.trailing_stop_price:
+                # Ensure we don't move trail BELOW Entry if we are in profit (Breakeven priority)
+                if new_trail_price < self.entry_premium and self.breakeven_active:
+                    new_trail_price = self.entry_premium
+                
+                self.trailing_stop_price = new_trail_price
+                logger.info(f"  📈 Trailing Updated ({trail_mode}): ₹{self.trailing_stop_price:.2f} (Peak: ₹{self.highest_premium:.2f})")
+
+        return False, None, pnl, diff
 
 # ==================== SIGNAL LOGIC ====================
 def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation):
@@ -790,10 +798,10 @@ Trade Log:   {CSV_FILE}
 Terminal Log: {TERMINAL_LOG_FILE}
 Expiry:      {current_expiry_date}
 Lot Size:    {LOT_SIZE} quantity
-Min Premium: ₹{MIN_PREMIUM}
-Stop Loss:   {STOP_LOSS_PCT*100:.0f}% (or Min {MIN_SL_POINTS} pts)
+Desc:        Scalping Mode (Pure ATR)
+Stop Loss:   ATR Based (Entry - 1.5x ATR)
 Breakeven:   At {BREAKEVEN_TRIGGER_PCT*100:.0f}% Profit
-Trailing:    Tier 1 ({TIER1_TRAIL_PCT*100:.0f}%) → Tier 2 ({TIER2_TRAIL_PCT*100:.0f}%) > 15%
+Trailing:    ATR Based (High - 0.5x ATR)
 Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
 Trade Limit: 1 trade per day
 Protection:  Exchange Limit Orders (SL) + Software Backup
@@ -1042,8 +1050,7 @@ def main():
                             logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
                         else:
                             logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
-                        # ============================================
-                        
+                            
                         logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
 
                         log_trade_to_csv(timestamp, f"EXIT {open_position.signal_type}", open_position.strike,
@@ -1060,7 +1067,6 @@ def main():
                                 {"name": "Order ID", "value": str(exit_order_id or "N/A"), "inline": True}
                             ]
                         )
-
                         open_position = None
 
                 days_open_cache = None
@@ -1162,11 +1168,10 @@ def main():
                         log_trade_to_csv(timestamp, f"EXIT {open_position.signal_type}", open_position.strike,
                                        current_premium, 0, 0, 0, 0, "", exit_reason, final_pnl, final_premium_diff)
 
-                        color = 0x00ff00 if final_pnl > 0 else 0xff0000
                         send_discord_alert(
                             f"🔔 {exit_reason}",
-                            f"**{open_position.signal_type}** | Strike: {open_position.strike}",
-                            color,
+                            f"**{open_position.signal_type}** | Strike: {open_position.strike}\nReason: {exit_reason}",
+                            0xff0000 if final_pnl < 0 else 0x00ff00,
                             [
                                 {"name": "Entry", "value": f"₹{open_position.entry_premium:.2f}", "inline": True},
                                 {"name": "Exit", "value": f"₹{current_premium:.2f}", "inline": True},
@@ -1240,12 +1245,8 @@ def main():
                 strike, premium, instrument_key = find_atm_strike_and_premium(spot, option_type)
 
                 if strike is not None and premium is not None and instrument_key:
-                    # ===== PREMIUM FILTER (Avoid Traps) =====
-                    if premium < MIN_PREMIUM:
-                        logger.warning(f"⚠️  Signal IGNORED: Premium ₹{premium:.2f} < Minimum ₹{MIN_PREMIUM}")
-                        logger.info("   (Low premiums are risky/high-decay zones)")
-                        time.sleep(5) # Short pause
-                        continue
+                    # ===== PREMIUM FILTER REMOVED (User Request: Pure ATR) =====
+                    # Old logic: if premium < MIN_PREMIUM: continue (REMOVED)
                     # ========================================
 
                     timestamp = now.strftime('%Y-%m-%d %I:%M:%S %p')
@@ -1281,53 +1282,120 @@ def main():
                     # Wait for BUY order to fill before placing SL
                     logger.info("  ⏳ Waiting for BUY order to complete...")
                     
-                    # CRITICAL SAFETY: Wait for order to be COMPLETE (not just open)
-                    # Retry up to 30 times (30 seconds total) to confirm order completion
-                    # Sandbox often has latency or returns 'put order req received' for a while
                     entry_status = None
-                    max_retry = 40 if SANDBOX_MODE else 15
+                    order_confirmed = False # Track if we proceed or stop
                     
-                    for retry in range(max_retry):
-                        time.sleep(1)
+                    # Wait loop (Standard 5s check + extended states)
+                    for i in range(1, 6):
                         entry_status = check_order_status(order_id)
-                        logger.info(f"  🔍 Entry Order Status (attempt {retry+1}/{max_retry}): {entry_status}")
                         
-                        if entry_status == 'complete':
-                            logger.info(f"  ✅ Entry BUY order COMPLETED successfully")
+                        # ACCEPT 'complete', 'open', 'put order req received' as success
+                        # This matches the user's "previously worked" logic but adds pending state handling
+                        if entry_status in ['complete', 'open', 'put order req received', 'validation pending']:
+                            logger.info(f"  ✅ Entry Confirmed ({entry_status})")
+                            order_confirmed = True
                             break
-                        elif entry_status in ('rejected', 'cancelled'):
-                            logger.error(f"  ❌ Entry order was {entry_status.upper()}")
+                        elif entry_status in ['rejected', 'cancelled']:
+                            logger.error(f"  ❌ Entry Failed ({entry_status})")
                             break
-                        # If 'open', 'trigger pending', or 'put order req received', continue waiting
+                        
+                        time.sleep(1)
                     
-                    # CRITICAL SAFETY: Only proceed if BUY order is COMPLETE
-                    # EXCEPTION FOR SANDBOX: Allow 'put order req received' as it often gets stuck there but is actually placed
-                    if entry_status != 'complete':
-                        if SANDBOX_MODE and entry_status == 'put order req received':
-                            logger.warning(f"  ⚠️ Sandbox Order Status: '{entry_status}' - Assumed SUCCESS for testing")
-                            logger.info(f"  ✅ Proceeding with position tracking (Sandbox Exception)")
+                    # CRITICAL SAFETY: Proceed if order is Confirmed (Complete OR Pending/Open)
+                    if not order_confirmed:
+                        logger.error(f"  ❌ Entry order status is '{entry_status}' (NOT complete).")
+                        logger.error(f"  🚨 CRITICAL: Cannot confirm BUY order execution")
+                        logger.error(f"  🚫 BOT STOPPED to prevent NAKED OPTION SELLING")
+                        send_discord_alert(
+                            "🚨 Bot Stopped - Order Not Confirmed",
+                            f"Order {order_id} status: {entry_status}\n\nCannot confirm BUY order completion. Bot stopped to prevent naked selling.",
+                            0xff0000
+                        )
+                        logger.info("\n" + "="*85)
+                        logger.info("⏹️  BOT STOPPED FOR SAFETY")
+                        logger.info("="*85)
+                        sys.exit(1)
+
+                    # ===== CALCULATE ATR FOR RISK MANAGEMENT =====
+                    atr_value = None
+                    try:
+                        logger.info(f"  📊 Fetching history for {strike} {option_type} to calculate ATR...")
+                        
+                        # Helper to fetch option history
+                        def fetch_option_history(inst_key):
+                            enc_key = urllib.parse.quote(inst_key)
+                            all_candles = []
+                            hist_count = 0
+                            intra_count = 0
+                            
+                            # 1. Fetch 5 Days History (Excluding Today)
+                            today = dt.datetime.now().strftime('%Y-%m-%d')
+                            yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime('%Y-%m-%d')
+                            from_date = (dt.datetime.now() - dt.timedelta(days=6)).strftime('%Y-%m-%d')
+                            
+                            hist_url = f"https://api.upstox.com/v2/historical-candle/{enc_key}/1minute/{yesterday}/{from_date}"
+                            headers = {"accept": "application/json", "Authorization": f"Bearer {ACCESS_TOKEN}"}
+                            
+                            try:
+                                r_hist = session.get(hist_url, headers=headers, timeout=5)
+                                if r_hist.status_code == 200:
+                                    hist_data = r_hist.json()
+                                    candles = hist_data.get('data', {}).get('candles', [])
+                                    if candles:
+                                        all_candles.extend(candles)
+                                        hist_count = len(candles)
+                            except Exception:
+                                pass # Ignore history failure, try intraday
+                                
+                            # 2. Fetch Today's Live Intraday Data
+                            intra_url = f"https://api.upstox.com/v2/historical-candle/intraday/{enc_key}/1minute"
+                            try:
+                                r_intra = session.get(intra_url, headers=headers, timeout=5)
+                                if r_intra.status_code == 200:
+                                    intra_data = r_intra.json()
+                                    candles = intra_data.get('data', {}).get('candles', [])
+                                    if candles:
+                                        all_candles.extend(candles)
+                                        intra_count = len(candles)
+                            except Exception:
+                                pass
+
+                            if all_candles:
+                                odf = pd.DataFrame(all_candles, columns=["time","open","high","low","close","volume","oi"])
+                                odf["time"] = pd.to_datetime(odf["time"])
+                                odf = odf.drop_duplicates(subset=['time']).sort_values("time").reset_index(drop=True)
+                                odf.set_index("time", inplace=True)
+                                # Resample to 5min
+                                odf_5 = odf.resample('5min').agg({'high':'max', 'low':'min', 'close':'last'}).dropna()
+                                return odf_5
+                            return None
+
+                        opt_df = fetch_option_history(instrument_key)
+                        if opt_df is not None and len(opt_df) > 15:
+                            opt_df = calculate_atr(opt_df, period=14)
+                            atr_value = opt_df.iloc[-1]['ATR']
+                            logger.info(f"  ✅ ATR: {atr_value:.2f} | SL: Entry - {atr_value*2:.2f} pts")
                         else:
-                            logger.error(f"  ❌ Entry order status is '{entry_status}' (NOT complete).")
-                            
-                            # In Sandbox, if it's still 'open' or 'put order req received', we might want to warn but allow logic to proceed 
-                            # IF AND ONLY IF you are testing. But for safety, we usually stop.
-                            # However, to avoid 'put order req received' blocking us during tests, we can add a specific exception check or just fail.
-                            # Given the user's issue, the order IS placed but status is slow.
-                            
-                            logger.error(f"  🚨 CRITICAL: Cannot confirm BUY order execution")
-                            logger.error(f"  🚫 BOT STOPPED to prevent NAKED OPTION SELLING")
-                            logger.error("  💡 Order may have been rejected, cancelled, or still pending")
+                            logger.error("  ❌ Could not calculate ATR (Insufficient history).")
+                            logger.error("  🚫 BOT STOPPED - ATR calculation is mandatory for risk management")
                             send_discord_alert(
-                                "🚨 Bot Stopped - Order Not Confirmed",
-                                f"Order {order_id} status: {entry_status}\n\nCannot confirm BUY order completion. Bot stopped to prevent naked selling.\n\nPlease check order status manually and restart bot.",
+                                "🚨 Bot Stopped - ATR Calculation Failed",
+                                f"Cannot calculate ATR for {strike} {option_type}. Insufficient historical data.\n\nBot stopped to prevent trading without proper risk management.",
                                 0xff0000
                             )
-                            logger.info("\n" + "="*85)
-                            logger.info("⏹️  BOT STOPPED FOR SAFETY")
-                            logger.info("="*85)
-                            sys.exit(1)  # Exit with error code
+                            sys.exit(1)
+                            
+                    except Exception as e:
+                        logger.error(f"  ❌ ATR Calculation Failed: {e}")
+                        logger.error("  🚫 BOT STOPPED - ATR calculation is mandatory")
+                        send_discord_alert(
+                            "🚨 Bot Stopped - ATR Error",
+                            f"ATR calculation error: {e}\n\nBot stopped for safety.",
+                            0xff0000
+                        )
+                        sys.exit(1)
 
-                    open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id)
+                    open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id, atr=atr_value)
                     
                     # ===== LIVE ORDER: PLACE SL ORDER ON EXCHANGE =====
                     # SAFETY CONFIRMED: We have a completed BUY position (verified above)
@@ -1335,10 +1403,11 @@ def main():
                     # It will sit as "Trigger Pending" until price hits the trigger
                     logger.info(f"  ✅ BUY position confirmed. Now placing protective SL order...")
                     
-                    logger.info(f"  ✅ BUY position confirmed. Now placing protective SL order...")
-                    
-                    # Calculate SL trigger using HYBRID LOGIC (Max of % or Min Points)
-                    sl_points = max(premium * STOP_LOSS_PCT, MIN_SL_POINTS)
+                    # Calculate SL trigger using ATR Logic
+                    # Position class now strictly uses atr * 1.5
+                    sl_points = open_position.atr * 1.5
+                    logger.info(f"  🎯 SL Strategy: ATR-Based ({open_position.atr:.2f} * 1.5 = {sl_points:.2f} pts)")
+
                     sl_trigger = premium - sl_points
                     
                     # CRITICAL FIX: Skip SL order if trigger price would be negative or zero
