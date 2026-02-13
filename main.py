@@ -30,7 +30,7 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
-SANDBOX_MODE = True         # <<-- SET TO True FOR SANDBOX TESTING
+SANDBOX_MODE = False         # <<-- SET TO True FOR SANDBOX TESTING
 LIVE_TRADING = True         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
 
 # Separate tokens for Data (Live) and Orders (Sandbox/Live)
