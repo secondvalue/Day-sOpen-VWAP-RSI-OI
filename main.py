@@ -25,11 +25,7 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
-<<<<<<< HEAD
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTkzZTM0MjMxYmRhOTRiMjFhZWRkODMiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTI5OTY1MCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMzY1NjAwfQ.CksqawPNfmFh8HLtvohC-byiBiPIqPiRjzWbGHU0tNw"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
-=======
 LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTkzZTI5YjEwOTAzOTA2YWEyNGNjZTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTI5OTQ4MywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMzY1NjAwfQ.G-4Hr8x41KjxyKzCA5N7IFG18QpbUPAwjfNYEduOw34"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
->>>>>>> 96ecdc8d2b4920e71db119bfa8e1076096ef0950
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
@@ -56,7 +52,7 @@ LOT_SIZE = 65             # NIFTY 50 lot size
 
 # ==================== RISK MANAGEMENT (FIXED) ====================
 TAKE_PROFIT = 500.0    # Activates Trailing Stop when profit reaches ₹500
-STOP_LOSS = 1000.0     # Fixed Stop Loss (exit if loss > ₹1500)
+STOP_LOSS = 500.0     # Fixed Stop Loss (exit if loss > ₹1500)
 TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 MIN_5MIN_BARS = 1
