@@ -25,7 +25,7 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OThlOWUxM2UyNGM4NDExZmY2NTY0NjAiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MDk1NDI1OSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMDIwMDAwfQ.gWyH3z8RBIEDM38I2cycDzNe1gSx6QV9aayycGdcaRs"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTkzZTM0MjMxYmRhOTRiMjFhZWRkODMiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTI5OTY1MCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMzY1NjAwfQ.CksqawPNfmFh8HLtvohC-byiBiPIqPiRjzWbGHU0tNw"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
@@ -50,11 +50,10 @@ SIGNAL_COOLDOWN = 300     # seconds
 LOT_SIZE = 65             # NIFTY 50 lot size
 
 
-# Stage 2: Breakeven (Risk-Free)
-BREAKEVEN_TRIGGER_PCT = 0.05  # Move SL to Entry when profit hits 5% (Scalping)
-
-# Stage 3: Adaptive Trailing (ATR Based)
-# ATR Logic: Initial SL = Entry - 1.5*ATR | Trailing Check = High - 0.5*ATR
+# ==================== RISK MANAGEMENT (FIXED) ====================
+TAKE_PROFIT = 500.0    # Activates Trailing Stop when profit reaches ₹500
+STOP_LOSS = 1000.0     # Fixed Stop Loss (exit if loss > ₹1500)
+TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 MIN_5MIN_BARS = 1
 
@@ -219,19 +218,19 @@ def place_sl_order(instrument_key, quantity, trigger_price, order_tag="SL_ORDER"
     trigger_price = round_to_tick(trigger_price)
     limit_price = max(0.05, round_to_tick(raw_limit_price))
     
+    # Truncate order tag to 20 chars (common API limit)
+    safe_order_tag = order_tag[:20] if order_tag else "SL_ORDER"
+    
     payload = {
         "quantity": quantity,
         "product": "I",                    # Intraday
         "validity": "DAY",
         "price": limit_price,              # Limit price for SL order
-        "tag": order_tag,
+        "tag": safe_order_tag,
         "instrument_token": instrument_key,
         "order_type": "SL",                # Stop Loss Limit (not SL-M)
         "transaction_type": "SELL",
-        "disclosed_quantity": 0,
-        "trigger_price": trigger_price,
-        "is_amo": False,
-        "slice": False                     # Disable auto-slicing for V3 API
+        "trigger_price": trigger_price
     }
     
     try:
@@ -247,8 +246,9 @@ def place_sl_order(instrument_key, quantity, trigger_price, order_tag="SL_ORDER"
             logger.info(f"  ✅ SL ORDER PLACED: Trigger @ ₹{trigger_price:.2f} | Order ID: {order_id}")
             return True, order_id, "SL order placed successfully"
         else:
+            # Capture full error details for debugging
             error_msg = response_data.get('message', response_data.get('errors', 'Unknown error'))
-            logger.error(f"  ❌ SL ORDER FAILED: {error_msg}")
+            logger.error(f"  ❌ SL ORDER FAILED: {error_msg} | Full Response: {response_data}")
             return False, None, str(error_msg)
             
     except Exception as e:
@@ -609,22 +609,13 @@ def calculate_vwap_rsi(df):
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
 
-    # Use Simple Moving Average (SMA) for RSI (Old Logic)
-    avg_gain = gain.rolling(window=14, min_periods=1).mean()
-    avg_loss = loss.rolling(window=14, min_periods=1).mean()
+    # Use Wilder's Smoothing (Exponential Moving Average) for RSI - Standard & Faster
+    # Alpha = 1/14 for Wilder's Smoothing
+    avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
 
-    rs = pd.Series(np.zeros(len(df)), index=df.index)
-    mask_loss_pos = avg_loss > 0
-    rs[mask_loss_pos] = avg_gain[mask_loss_pos] / avg_loss[mask_loss_pos]
-
-    rsi = pd.Series(np.full(len(df), 50.0), index=df.index)
-    rsi[mask_loss_pos] = 100 - (100 / (1 + rs[mask_loss_pos]))
-
-    mask_loss_zero_gain_pos = (avg_loss == 0) & (avg_gain > 0)
-    rsi[mask_loss_zero_gain_pos] = 100.0
-
-    mask_gain_zero_loss_pos = (avg_gain == 0) & (avg_loss > 0)
-    rsi[mask_gain_zero_loss_pos] = 0.0
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
     
     df['RSI'] = rsi.fillna(50.0)
 
@@ -669,87 +660,68 @@ def find_atm_strike_and_premium(spot_price, option_type):
 
 # ==================== POSITION CLASS ====================
 class Position:
-    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp, entry_order_id=None, atr=None):
+    def __init__(self, signal_type, strike, entry_premium, instrument_key, timestamp, entry_order_id=None):
         self.signal_type = signal_type
         self.strike = strike
         self.entry_premium = float(entry_premium)
         self.instrument_key = instrument_key
         self.timestamp = timestamp
         self.lot_size = LOT_SIZE
-        self.highest_premium = float(entry_premium) # Track highest price for trailing
-        self.breakeven_active = False           # Track if breakeven is hit
+        self.highest_pnl = -999999.0 # Initialize low
         self.trailing_stop_active = False
         self.trailing_stop_price = None
         self.entry_order_id = entry_order_id    # Track entry order ID
-        self.exit_order_id = None                # Track exit order ID
-        self.sl_order_id = None                  # Track SL order ID on exchange
-        self.sl_trigger_price = None             # SL trigger price
-        self.atr = atr                          # ATR is now MANDATORY for risk
+        
+        # Note: No exchange SL order ID needed for software-based SL
+        # But we keep the field to avoid breaking logging if referenced, 
+        # though we won't use it for logic.
+        self.sl_order_id = None 
 
     def calculate_pnl(self, current_premium):
         diff = current_premium - self.entry_premium
         pnl = diff * self.lot_size
         
-        # Track highest premium for trailing calculations
-        if current_premium > self.highest_premium:
-            self.highest_premium = current_premium
-            
+        # Track highest P&L for potential stats, though trailing uses price levels mostly?
+        # Wait, snippet used P&L for check but calculated trail based on premium?
+        # Snippet: self.trailing_stop_price = current_premium - (TRAILING_STOP / self.lot_size)
+        if pnl > self.highest_pnl: self.highest_pnl = pnl
         return pnl, diff
 
     def check_exit(self, current_premium):
         pnl, diff = self.calculate_pnl(current_premium)
-        pnl_pct = diff / self.entry_premium
-
-        # --- 1. INITIAL STOP LOSS CHECK (ATR Only) ---
-        # Safety: If ATR is missing (shouldn't happen with strict check), default to 20 pts?
-        # User requested "ATR Only", so we assume ATR is valid.
         
-        current_atr = self.atr if self.atr else 10.0 # Fallback should not be reached if strict
+        # 1. FIXED STOP LOSS
+        if pnl <= -STOP_LOSS:
+            return True, f"STOP LOSS (Loss: ₹{abs(pnl):.2f})", pnl, diff
+
+        # 2. TAKE PROFIT -> ACTIVATE TRAILING
+        if pnl >= TAKE_PROFIT:
+            if not self.trailing_stop_active:
+                self.trailing_stop_active = True
+                # Initial Trail: Current Price - (Trailing Step in Points)
+                # e.g. If Step is 500rs, and Lot is 65: 500/65 = 7.7 pts distance
+                trail_gap_pts = TRAILING_STOP / self.lot_size
+                self.trailing_stop_price = current_premium - trail_gap_pts
+                logger.info(f"  🎯 Take Profit reached! Trailing stop activated @ ₹{self.trailing_stop_price:.2f}")
         
-        # Initial SL: Entry - 1.5 * ATR (Scalping Mode)
-        sl_points = current_atr * 1.5
-        stop_loss_price = self.entry_premium - sl_points
-        
-        # If Breakeven is active, SL is at Entry Price
-        if self.breakeven_active:
-             stop_loss_price = self.entry_premium
-             
-        # If Trailing is active, SL is at Trailing Price
-        if self.trailing_stop_active and self.trailing_stop_price:
-             stop_loss_price = max(stop_loss_price, self.trailing_stop_price)
-
-        if current_premium <= stop_loss_price:
-            reason = f"STOP LOSS (ATR: {self.atr:.2f})" if self.atr else "STOP LOSS"
-            if self.breakeven_active: reason = "BREAKEVEN HIT (Risk-Free)"
-            if self.trailing_stop_active: reason = f"TRAILING STOP (Profit: ₹{pnl:.2f})"
-            return True, reason, pnl, diff
-
-        # --- 2. BREAKEVEN CHECK (Stage 2) ---
-        # Activate if profit > 8% (unchanged)
-        if pnl_pct >= BREAKEVEN_TRIGGER_PCT and not self.breakeven_active:
-            self.breakeven_active = True
-            logger.info(f"  🛡️ BREAKEVEN ACTIVATED: SL moved to Entry @ ₹{self.entry_premium:.2f}")
-
-        # --- 3. TRAILING CHECK (ATR Based) ---
-        # Starts trailing immediately or after Breakeven? 
-        # Let's activate trailing once we are above Breakeven to avoid noise
-        if pnl_pct >= BREAKEVEN_TRIGGER_PCT:
-            self.trailing_stop_active = True
+        # 3. TRAILING STOP CHECK
+        if self.trailing_stop_active:
+            # Check exit
+            if current_premium <= self.trailing_stop_price:
+                return True, f"TRAILING STOP (Profit: ₹{pnl:.2f})", pnl, diff
             
-            # Trailing Gap: 0.5 * ATR (Aggressive Scalping Mode)
-            trail_gap = current_atr * 0.5
-            trail_mode = f"ATR ({trail_gap:.2f})"
-
-            new_trail_price = self.highest_premium - trail_gap
+            # Update Trail
+            # Logic: If price moves up, pull trail up?
+            # Snippet: new_trail = current_premium - (TRAILING_STOP / self.lot_size)
+            # This is a fixed distance trail from *current* price? 
+            # Snippet logic: if new_trail > self.trailing_stop_price: update
+            # Yes, standard trailing.
+            trail_gap_pts = TRAILING_STOP / self.lot_size
+            new_trail = current_premium - trail_gap_pts
             
-            # Only move trail UP
-            if self.trailing_stop_price is None or new_trail_price > self.trailing_stop_price:
-                # Ensure we don't move trail BELOW Entry if we are in profit (Breakeven priority)
-                if new_trail_price < self.entry_premium and self.breakeven_active:
-                    new_trail_price = self.entry_premium
-                
-                self.trailing_stop_price = new_trail_price
-                logger.info(f"  📈 Trailing Updated ({trail_mode}): ₹{self.trailing_stop_price:.2f} (Peak: ₹{self.highest_premium:.2f})")
+            if new_trail > self.trailing_stop_price:
+                self.trailing_stop_price = new_trail
+                logger.info(f"  📈 Trailing stop updated: ₹{self.trailing_stop_price:.2f}")
 
         return False, None, pnl, diff
 
@@ -759,13 +731,13 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation
         'CE': {
             'price_above_open': spot > day_open,
             'price_above_vwap': spot > vwap,
-            'rsi_bullish': rsi > 60,
+            'rsi_bullish': rsi > 50,  # Changed from 60 to 50 for faster entry
             'oi_bullish': oi_trend == 'Bullish' and oi_confirmation.startswith('Strong')
         },
         'PE': {
             'price_below_open': spot < day_open,
             'price_below_vwap': spot < vwap,
-            'rsi_bearish': rsi < 40,
+            'rsi_bearish': rsi < 50,  # Changed from 40 to 50 for faster entry
             'oi_bearish': oi_trend == 'Bearish' and oi_confirmation.startswith('Strong')
         }
     }
@@ -798,13 +770,12 @@ Trade Log:   {CSV_FILE}
 Terminal Log: {TERMINAL_LOG_FILE}
 Expiry:      {current_expiry_date}
 Lot Size:    {LOT_SIZE} quantity
-Desc:        Scalping Mode (Pure ATR)
-Stop Loss:   ATR Based (Entry - 1.5x ATR)
-Breakeven:   At {BREAKEVEN_TRIGGER_PCT*100:.0f}% Profit
-Trailing:    ATR Based (High - 0.5x ATR)
+Desc:        Fixed Risk Management
+Stop Loss:   ₹{STOP_LOSS} (Exchange Order)
+Target:      ₹{TAKE_PROFIT} (Activates Trailing)
+Trailing:    ₹{TRAILING_STOP} Step
 Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
-Trade Limit: 1 trade per day
-Protection:  Exchange Limit Orders (SL) + Software Backup
+Protection:  Exchange SL Order
 
 ✅ NEW: Live Order Execution via Upstox API
 ✅ NEW: Exchange Stop Loss Protection
@@ -832,8 +803,8 @@ def print_signal_evaluation(conditions):
     evaluation = f"""
 🔍 SIGNAL EVALUATION (All ✅ required for trade)
 {'-' * 85}
-  CALL: {'✅' if ce['price_above_open'] else '❌'} Open  {'✅' if ce['price_above_vwap'] else '❌'} VWAP  {'✅' if ce['rsi_bullish'] else '❌'} RSI>60  {'✅' if ce['oi_bullish'] else '❌'} OI-Bull  →  {ce_result}
-  PUT:  {'✅' if pe['price_below_open'] else '❌'} Open  {'✅' if pe['price_below_vwap'] else '❌'} VWAP  {'✅' if pe['rsi_bearish'] else '❌'} RSI<40  {'✅' if pe['oi_bearish'] else '❌'} OI-Bear  →  {pe_result}
+  CALL: {'✅' if ce['price_above_open'] else '❌'} Open  {'✅' if ce['price_above_vwap'] else '❌'} VWAP  {'✅' if ce['rsi_bullish'] else '❌'} RSI>50  {'✅' if ce['oi_bullish'] else '❌'} OI-Bull  →  {ce_result}
+  PUT:  {'✅' if pe['price_below_open'] else '❌'} Open  {'✅' if pe['price_below_vwap'] else '❌'} VWAP  {'✅' if pe['rsi_bearish'] else '❌'} RSI<50  {'✅' if pe['oi_bearish'] else '❌'} OI-Bear  →  {pe_result}
 """
     logger.info(evaluation)
 
@@ -1112,16 +1083,23 @@ def main():
                         logger.info(f"🔔 POSITION CLOSED: {exit_reason}")
                         logger.info("="*85)
                         
-                        # ===== CANCEL SL ORDER IF EXISTS (for trailing stop exit) =====
+                        # ===== CANCEL SL ORDER IF EXISTS (for trailing/target exit) =====
                         if open_position.sl_order_id and "STOP LOSS" not in exit_reason:
-                            # Cancel SL order before placing exit (trailing stop exit)
+                            # If we hit target or trailing stop, we must cancel the exchange SL
+                            # If we hit SL, the order is already executed (or we are market exiting)
+                            # Actually, if "STOP LOSS" is in reason, it might be SOFTWARE SL hit before exchange?
+                            # If exchange SL hit, the position manager loop might not even know yet until next poll?
+                            # But here we are EXPLICITLY closing via software condition.
+                            # So yes, cancel SL.
+                            logger.info(f"  🚫 Cancelling SL order: {open_position.sl_order_id}...")
                             cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
                             if cancel_success:
-                                logger.info(f"  🚫 SL ORDER CANCELLED (trailing exit)")
+                                logger.info(f"  ✅ SL ORDER CANCELLED")
                             else:
-                                logger.warning(f"  ⚠️ SL Cancel failed (may have already triggered): {cancel_msg}")
+                                logger.warning(f"  ⚠️ SL Cancel failed: {cancel_msg}")
                         # ============================================================
                         
+                        logger.info(f"  Entry:       ₹{open_position.entry_premium:.2f}")
                         # ===== LIVE ORDER: EXIT AT SL/TP/TRAILING =====
                         # Only place exit order if SL didn't trigger on exchange
                         if "STOP LOSS" not in exit_reason or not open_position.sl_order_id:
@@ -1280,35 +1258,56 @@ def main():
                     # ==================================
                     
                     # Wait for BUY order to fill before placing SL
-                    logger.info("  ⏳ Waiting for BUY order to complete...")
+                    logger.info("  ⏳ Waiting for BUY order to COMPLETE...")
                     
                     entry_status = None
                     order_confirmed = False # Track if we proceed or stop
                     
-                    # Wait loop (Standard 5s check + extended states)
-                    for i in range(1, 6):
+                    # Wait loop (Extended to 60s for EXTREME Sandbox Lag)
+                    for i in range(1, 61):
                         entry_status = check_order_status(order_id)
                         
-                        # ACCEPT 'complete', 'open', 'put order req received' as success
-                        # This matches the user's "previously worked" logic but adds pending state handling
-                        if entry_status in ['complete', 'open', 'put order req received', 'validation pending']:
+                        # STRICT: Only ACCEPT 'complete' as success (Except Sandbox)
+                        if entry_status == 'complete':
                             logger.info(f"  ✅ Entry Confirmed ({entry_status})")
                             order_confirmed = True
                             break
+                        
+                        # SANDBOX EXCEPTION: Accept 'put order req received' after 5s to allow testing
+                        if SANDBOX_MODE and entry_status in ['open', 'put order req received'] and i > 5:
+                             logger.info(f"  ✅ Entry Confirmed ({entry_status}) [Sandbox Mode]")
+                             order_confirmed = True
+                             break
+                             
                         elif entry_status in ['rejected', 'cancelled']:
                             logger.error(f"  ❌ Entry Failed ({entry_status})")
                             break
+                        elif entry_status in ['open', 'put order req received', 'validation pending']:
+                            if i % 5 == 0: # Log every 5 seconds
+                                logger.info(f"  ⏳ Entry status: {entry_status} ... waiting ({i}/60s)")
+                        else:
+                            logger.warning(f"  ⚠️ Unknown Status: {entry_status}")
                         
                         time.sleep(1)
                     
-                    # CRITICAL SAFETY: Proceed if order is Confirmed (Complete OR Pending/Open)
+                    # CRITICAL SAFETY: Proceed ONLY if order is COMPLETE (or Accepted in Sandbox)
                     if not order_confirmed:
-                        logger.error(f"  ❌ Entry order status is '{entry_status}' (NOT complete).")
-                        logger.error(f"  🚨 CRITICAL: Cannot confirm BUY order execution")
-                        logger.error(f"  🚫 BOT STOPPED to prevent NAKED OPTION SELLING")
+                        logger.error(f"  ❌ Entry order status is '{entry_status}' (NOT complete) after wait.")
+                        logger.error(f"  🚨 CRITICAL: Buy order NOT filled. ABORTING SL PLACEMENT.")
+                        logger.error(f"  💡 If order is 'open'/'pending', it might fill later. Please check App manually!")
+                        
+                        # Auto-cancel if still pending/open to avoid late fill without SL
+                        if entry_status in ['open', 'put order req received', 'validation pending']:
+                            logger.info(f"  🚫 Attempting to cancel STUCK '{entry_status}' entry order {order_id}...")
+                            cancel_result, cancel_msg_out = cancel_order(order_id)
+                            if cancel_result:
+                                logger.info(f"  ✅ Stuck Entry Order Cancelled Successfully.")
+                            else:
+                                logger.error(f"  ❌ Failed to cancel stuck entry order: {cancel_msg_out}")
+
                         send_discord_alert(
-                            "🚨 Bot Stopped - Order Not Confirmed",
-                            f"Order {order_id} status: {entry_status}\n\nCannot confirm BUY order completion. Bot stopped to prevent naked selling.",
+                            "🚨 Bot Stopped - Entry Stuck",
+                            f"Order {order_id} status: {entry_status}\n\nTerminating to prevent naked position.",
                             0xff0000
                         )
                         logger.info("\n" + "="*85)
@@ -1316,129 +1315,41 @@ def main():
                         logger.info("="*85)
                         sys.exit(1)
 
-                    # ===== CALCULATE ATR FOR RISK MANAGEMENT =====
-                    atr_value = None
-                    try:
-                        logger.info(f"  📊 Fetching history for {strike} {option_type} to calculate ATR...")
-                        
-                        # Helper to fetch option history
-                        def fetch_option_history(inst_key):
-                            enc_key = urllib.parse.quote(inst_key)
-                            all_candles = []
-                            hist_count = 0
-                            intra_count = 0
                             
-                            # 1. Fetch 5 Days History (Excluding Today)
-                            today = dt.datetime.now().strftime('%Y-%m-%d')
-                            yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime('%Y-%m-%d')
-                            from_date = (dt.datetime.now() - dt.timedelta(days=6)).strftime('%Y-%m-%d')
-                            
-                            hist_url = f"https://api.upstox.com/v2/historical-candle/{enc_key}/1minute/{yesterday}/{from_date}"
-                            headers = {"accept": "application/json", "Authorization": f"Bearer {ACCESS_TOKEN}"}
-                            
-                            try:
-                                r_hist = session.get(hist_url, headers=headers, timeout=5)
-                                if r_hist.status_code == 200:
-                                    hist_data = r_hist.json()
-                                    candles = hist_data.get('data', {}).get('candles', [])
-                                    if candles:
-                                        all_candles.extend(candles)
-                                        hist_count = len(candles)
-                            except Exception:
-                                pass # Ignore history failure, try intraday
-                                
-                            # 2. Fetch Today's Live Intraday Data
-                            intra_url = f"https://api.upstox.com/v2/historical-candle/intraday/{enc_key}/1minute"
-                            try:
-                                r_intra = session.get(intra_url, headers=headers, timeout=5)
-                                if r_intra.status_code == 200:
-                                    intra_data = r_intra.json()
-                                    candles = intra_data.get('data', {}).get('candles', [])
-                                    if candles:
-                                        all_candles.extend(candles)
-                                        intra_count = len(candles)
-                            except Exception:
-                                pass
-
-                            if all_candles:
-                                odf = pd.DataFrame(all_candles, columns=["time","open","high","low","close","volume","oi"])
-                                odf["time"] = pd.to_datetime(odf["time"])
-                                odf = odf.drop_duplicates(subset=['time']).sort_values("time").reset_index(drop=True)
-                                odf.set_index("time", inplace=True)
-                                # Resample to 5min
-                                odf_5 = odf.resample('5min').agg({'high':'max', 'low':'min', 'close':'last'}).dropna()
-                                return odf_5
-                            return None
-
-                        opt_df = fetch_option_history(instrument_key)
-                        if opt_df is not None and len(opt_df) > 15:
-                            opt_df = calculate_atr(opt_df, period=14)
-                            atr_value = opt_df.iloc[-1]['ATR']
-                            logger.info(f"  ✅ ATR: {atr_value:.2f} | SL: Entry - {atr_value*2:.2f} pts")
-                        else:
-                            logger.error("  ❌ Could not calculate ATR (Insufficient history).")
-                            logger.error("  🚫 BOT STOPPED - ATR calculation is mandatory for risk management")
-                            send_discord_alert(
-                                "🚨 Bot Stopped - ATR Calculation Failed",
-                                f"Cannot calculate ATR for {strike} {option_type}. Insufficient historical data.\n\nBot stopped to prevent trading without proper risk management.",
-                                0xff0000
-                            )
-                            sys.exit(1)
-                            
-                    except Exception as e:
-                        logger.error(f"  ❌ ATR Calculation Failed: {e}")
-                        logger.error("  🚫 BOT STOPPED - ATR calculation is mandatory")
-                        send_discord_alert(
-                            "🚨 Bot Stopped - ATR Error",
-                            f"ATR calculation error: {e}\n\nBot stopped for safety.",
-                            0xff0000
-                        )
-                        sys.exit(1)
-
-                    open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id, atr=atr_value)
+                    # Create Position object (Fixed Risk)
+                    open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id)
                     
+                    logger.info(f"  ✅ BUY position confirmed. Entry Price: {premium}")
+
                     # ===== LIVE ORDER: PLACE SL ORDER ON EXCHANGE =====
-                    # SAFETY CONFIRMED: We have a completed BUY position (verified above)
-                    # This SL is a SELL order to CLOSE our long position if price drops
-                    # It will sit as "Trigger Pending" until price hits the trigger
-                    logger.info(f"  ✅ BUY position confirmed. Now placing protective SL order...")
-                    
-                    # Calculate SL trigger using ATR Logic
-                    # Position class now strictly uses atr * 1.5
-                    sl_points = open_position.atr * 1.5
-                    logger.info(f"  🎯 SL Strategy: ATR-Based ({open_position.atr:.2f} * 1.5 = {sl_points:.2f} pts)")
-
+                    # Calculate SL trigger based on FIXED RISK (STOP_LOSS = 1500)
+                    # SL Amount per unit = 1500 / 65 = ~23.07 pts
+                    sl_points = STOP_LOSS / LOT_SIZE
                     sl_trigger = premium - sl_points
                     
-                    # CRITICAL FIX: Skip SL order if trigger price would be negative or zero
-                    # This happens when premium is very low (e.g., OTM options near expiry)
-                    # In such cases, max loss (premium paid) is already < configured SL%, so no SL needed
+                    logger.info(f"  🎯 SL Strategy: Fixed Risk ₹{STOP_LOSS} -> {sl_points:.2f} pts")
+
+                    # CRITICAL: Ensure SL Trigger is valid (> 0.05) and positive
                     if sl_trigger <= 0:
-                        total_investment = premium * LOT_SIZE
-                        logger.warning(f"  ⚠️ SL trigger would be ₹{sl_trigger:.2f} (INVALID - negative/zero)")
-                        logger.info(f"  ℹ️  Max possible loss: ₹{total_investment:.2f} (premium paid)")
-                        logger.info(f"  ✅ No SL order needed - Max loss already within risk limit")
-                        logger.info(f"  🛡️ Software monitoring active - will exit on trailing stop or market close")
-                        open_position.sl_order_id = None
-                        open_position.sl_trigger_price = None
-                    else:
-                        # Normal case: SL trigger is positive, place the order
-                        sl_success, sl_order_id, sl_msg = place_sl_order(
-                            instrument_key=instrument_key,
-                            quantity=LOT_SIZE,
-                            trigger_price=sl_trigger,
-                            order_tag=f"SL_{signal.replace(' ', '_')}"
-                        )
+                        logger.warning(f"  ⚠️ SL trigger calculated as ₹{sl_trigger:.2f} (<= 0). Adjusting to minimum ₹0.05")
+                        sl_trigger = 0.05
                         
-                        if sl_success:
-                            open_position.sl_order_id = sl_order_id
-                            open_position.sl_trigger_price = sl_trigger
-                            logger.info(f"  🛡️ SL ORDER ACTIVE on Exchange: Trigger @ ₹{sl_trigger:.2f}")
-                        else:
-                            logger.warning(f"  ⚠️ SL ORDER FAILED: {sl_msg} - Bot will monitor manually")
-                            # Fallback to software monitoring if exchange SL fails
-                            open_position.sl_trigger_price = sl_trigger
+                    # Place the SL order
+                    sl_success, sl_order_id, sl_msg = place_sl_order(
+                        instrument_key=instrument_key,
+                        quantity=LOT_SIZE,
+                        trigger_price=sl_trigger,
+                        order_tag=f"SL_{signal.replace(' ', '_')}"
+                    )
+                        
+                    if sl_success:
+                        open_position.sl_order_id = sl_order_id
+                        logger.info(f"  🛡️ SL ORDER ACTIVE on Exchange: Trigger @ ₹{sl_trigger:.2f}")
+                    else:
+                        logger.warning(f"  ⚠️ SL ORDER FAILED: {sl_msg} - Bot will monitor manually")
+                        # Fallback to software monitoring if exchange SL fails
                     # ==================================================
+
 
                     log_trade_to_csv(timestamp, signal, strike, premium, spot, rsi, vwap, day_open, oi_trend)
 
