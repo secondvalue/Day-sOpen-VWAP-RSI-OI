@@ -25,12 +25,12 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTkzZTI5YjEwOTAzOTA2YWEyNGNjZTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTI5OTQ4MywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxMzY1NjAwfQ.G-4Hr8x41KjxyKzCA5N7IFG18QpbUPAwjfNYEduOw34"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTk1MzM4M2JkMjZhNDQ2YTBkOTQ1YzkiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTM4NTczMSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxNDUyMDAwfQ.aWUfAIj-yxViB7Pc2p_gLhxpcXuwnZeabNQMIgUyxU8"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
-SANDBOX_MODE = True         # <<-- SET TO True FOR SANDBOX TESTING
+SANDBOX_MODE = False         # <<-- SET TO True FOR SANDBOX TESTING
 LIVE_TRADING = True         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
 
 # Separate tokens for Data (Live) and Orders (Sandbox/Live)
@@ -58,7 +58,7 @@ TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 MIN_5MIN_BARS = 1
 
 # ==================== POLLING INTERVALS ====================
-SIGNAL_CHECK_INTERVAL = 5     # seconds - interval when waiting for signals (FASTER: 5s)
+SIGNAL_CHECK_INTERVAL = 60    # seconds - interval when waiting for signals (SLOWER: 60s)
 POSITION_MONITOR_INTERVAL = 1 # seconds - interval when position is open (faster for trailing)
 
 TRADE_LOGS_DIR = "trade_logs"
@@ -404,7 +404,7 @@ def send_discord_alert(title, description, color=0x00ff00, fields=None):
         else:
             logger.warning(f"  ⚠️ Discord webhook returned {r.status_code}")
     except Exception as e:
-        logger.debug(f"  ❌ Discord send error: {e}")
+        logger.error(f"  ❌ Discord send error: {e}")
 
 # ==================== DATA FETCHING & PARSING ====================
 def get_spot_price():
@@ -953,7 +953,7 @@ def fetch_live_spot_candles(symbol):
         df_5min.reset_index(inplace=True)
         
         latest_time = df_5min.iloc[-1]['time'] if not df_5min.empty else "N/A"
-        logger.info(f"  ✅ Fetched {len(all_candles)} TOTAL 1-min → {len(df_5min)} 5-min candles (Latest: {latest_time})")
+        # logger.info(f"  ✅ Fetched {len(all_candles)} TOTAL 1-min → {len(df_5min)} 5-min candles (Latest: {latest_time})")
         return df_5min
         
     except Exception as e:
@@ -985,6 +985,8 @@ def main():
         while True:
             iteration += 1
             now = get_now_kolkata()
+
+
 
             logger.info("\n" + "="*85)
             logger.info(f"⏰ [{now.strftime('%d-%b-%Y %I:%M:%S %p')}] Iteration #{iteration}")
@@ -1047,31 +1049,13 @@ def main():
 
             # If position open - manage with fast 1-second polling
             if open_position:
-                # Initialize position monitoring counter if not exists
-                if not hasattr(open_position, 'monitor_count'):
-                    open_position.monitor_count = 0
-                open_position.monitor_count += 1
-                
-                # Log detailed status every 10 seconds (every 10th check)
-                verbose_log = (open_position.monitor_count % 10 == 1)
-                
-                if verbose_log:
-                    logger.info(f"\n💼 OPEN POSITION: {open_position.signal_type} {open_position.strike}")
-                    logger.info(f"   Entry: ₹{open_position.entry_premium:.2f} | Lot: {LOT_SIZE}")
-
                 current_premium = get_current_premium(open_position.instrument_key)
                 if current_premium:
                     pnl, premium_diff = open_position.calculate_pnl(current_premium)
 
-                    if verbose_log:
-                        logger.info(f"   Current: ₹{current_premium:.2f} | Diff: ₹{premium_diff:.2f}")
-                        logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
-                        if open_position.trailing_stop_active:
-                            logger.info(f"   🎯 Trailing Stop: ₹{open_position.trailing_stop_price:.2f}")
-                    else:
-                        # Compact single-line status for 1-second updates
-                        trail_info = f" | Trail: ₹{open_position.trailing_stop_price:.2f}" if open_position.trailing_stop_active else ""
-                        print(f"\r   ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}    ", end="", flush=True)
+                    # Compact single-line status for 1-second updates
+                    trail_info = f" | Trail: ₹{open_position.trailing_stop_price:.2f}" if open_position.trailing_stop_active else ""
+                    print(f"\r   ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}    ", end="", flush=True)
 
                     should_exit, exit_reason, final_pnl, final_premium_diff = open_position.check_exit(current_premium)
 
@@ -1163,7 +1147,7 @@ def main():
                         trade_completed_today = True  # One trade per day - done for today
                         logger.info("  📅 Daily trade limit reached - No more trades today")
 
-                time.sleep(POSITION_MONITOR_INTERVAL)  # 1 second polling when position is open
+                time.sleep(POSITION_MONITOR_INTERVAL)
                 continue
 
             # Normal flow: get day's open and market data
@@ -1204,7 +1188,9 @@ def main():
             # Check if daily trade limit reached
             if trade_completed_today:
                 logger.info("\n📅 DAILY TRADE COMPLETED - Monitoring only, no new trades today")
-                time.sleep(SIGNAL_CHECK_INTERVAL)
+                # Sync to next minute
+                sleep_sec = 60 - get_now_kolkata().second
+                time.sleep(sleep_sec)
                 continue
 
             if last_signal_time:
@@ -1372,8 +1358,15 @@ def main():
             else:
                 logger.info("\n⏸  NO SIGNAL - Waiting for all conditions to align...")
 
-            logger.info(f"\n⏱  Next check in {SIGNAL_CHECK_INTERVAL} seconds...")
-            time.sleep(SIGNAL_CHECK_INTERVAL)
+            # logger.info(f"\n⏱  Next check in {SIGNAL_CHECK_INTERVAL} seconds...")
+            # Skip long sleep if we just entered a position
+            if open_position:
+                continue
+                
+            # Sync to next minute (00 seconds) for clean candle alignment
+            sleep_sec = 60 - get_now_kolkata().second
+            # logger.info(f"⏳ Waiting {sleep_sec}s for next minute candle...")
+            time.sleep(sleep_sec)
 
     except KeyboardInterrupt:
         logger.info("\n\n" + "="*85)
