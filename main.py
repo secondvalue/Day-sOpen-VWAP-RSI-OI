@@ -51,8 +51,8 @@ LOT_SIZE = 65             # NIFTY 50 lot size
 
 
 # ==================== RISK MANAGEMENT (FIXED) ====================
-TAKE_PROFIT = 500.0    # Activates Trailing Stop when profit reaches ₹500
-STOP_LOSS = 500.0     # Fixed Stop Loss (exit if loss > ₹1500)
+TAKE_PROFIT = 1000.0    # Activates Trailing Stop when profit reaches ₹500
+STOP_LOSS = 1300.0     # Fixed Stop Loss (exit if loss > ₹1500)
 TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 MIN_5MIN_BARS = 1
