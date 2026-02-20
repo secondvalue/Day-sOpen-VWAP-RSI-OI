@@ -609,18 +609,28 @@ def calculate_vwap_rsi(df):
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
 
-    # Use Wilder's Smoothing (Exponential Moving Average) for RSI - Standard & Faster
-    # Alpha = 1/14 for Wilder's Smoothing
-    avg_gain = gain.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/14, min_periods=14, adjust=False).mean()
+    # V4.1 RSI Logic (SMA)
+    avg_gain = gain.rolling(window=14, min_periods=1).mean()
+    avg_loss = loss.rolling(window=14, min_periods=1).mean()
 
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    
+    rs = pd.Series(np.zeros(len(df)), index=df.index)
+    mask_loss_pos = avg_loss > 0
+    rs[mask_loss_pos] = avg_gain[mask_loss_pos] / avg_loss[mask_loss_pos]
+
+    rsi = pd.Series(np.full(len(df), 50.0), index=df.index)
+    rsi[mask_loss_pos] = 100 - (100 / (1 + rs[mask_loss_pos]))
+
+    mask_loss_zero_gain_pos = (avg_loss == 0) & (avg_gain > 0)
+    rsi[mask_loss_zero_gain_pos] = 100.0
+
+    mask_gain_zero_loss_pos = (avg_gain == 0) & (avg_loss > 0)
+    rsi[mask_gain_zero_loss_pos] = 0.0
+
     df['RSI'] = rsi.fillna(50.0)
 
     df.drop(columns=['TPV', 'Cumulative_TPV', 'Cumulative_Volume', 'high_low', 'high_close', 'low_close', 'tr'], errors='ignore', inplace=True)
     return df
+
 
 # ==================== FIND ATM & PREMIUM ====================
 def is_option_type_match(contract, optype):
@@ -731,13 +741,13 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation
         'CE': {
             'price_above_open': spot > day_open,
             'price_above_vwap': spot > vwap,
-            'rsi_bullish': rsi > 50,  # Changed from 60 to 50 for faster entry
+            'rsi_bullish': rsi > 60,  # V4.1 Threshold
             'oi_bullish': oi_trend == 'Bullish' and oi_confirmation.startswith('Strong')
         },
         'PE': {
             'price_below_open': spot < day_open,
             'price_below_vwap': spot < vwap,
-            'rsi_bearish': rsi < 50,  # Changed from 40 to 50 for faster entry
+            'rsi_bearish': rsi < 40,  # V4.1 Threshold
             'oi_bearish': oi_trend == 'Bearish' and oi_confirmation.startswith('Strong')
         }
     }
@@ -747,6 +757,7 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation
     if all(conditions['PE'].values()):
         return 'BUY PE', conditions
     return None, conditions
+
 
 # ==================== DISPLAY & LOGGING ====================
 def print_startup_banner():
@@ -803,8 +814,8 @@ def print_signal_evaluation(conditions):
     evaluation = f"""
 🔍 SIGNAL EVALUATION (All ✅ required for trade)
 {'-' * 85}
-  CALL: {'✅' if ce['price_above_open'] else '❌'} Open  {'✅' if ce['price_above_vwap'] else '❌'} VWAP  {'✅' if ce['rsi_bullish'] else '❌'} RSI>50  {'✅' if ce['oi_bullish'] else '❌'} OI-Bull  →  {ce_result}
-  PUT:  {'✅' if pe['price_below_open'] else '❌'} Open  {'✅' if pe['price_below_vwap'] else '❌'} VWAP  {'✅' if pe['rsi_bearish'] else '❌'} RSI<50  {'✅' if pe['oi_bearish'] else '❌'} OI-Bear  →  {pe_result}
+  CALL: {'✅' if ce['price_above_open'] else '❌'} Open  {'✅' if ce['price_above_vwap'] else '❌'} VWAP  {'✅' if ce['rsi_bullish'] else '❌'} RSI>60  {'✅' if ce['oi_bullish'] else '❌'} OI-Bull  →  {ce_result}
+  PUT:  {'✅' if pe['price_below_open'] else '❌'} Open  {'✅' if pe['price_below_vwap'] else '❌'} VWAP  {'✅' if pe['rsi_bearish'] else '❌'} RSI<40  {'✅' if pe['oi_bearish'] else '❌'} OI-Bear  →  {pe_result}
 """
     logger.info(evaluation)
 
