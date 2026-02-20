@@ -1157,6 +1157,8 @@ def main():
                         last_signal_time = now
                         trade_completed_today = True  # One trade per day - done for today
                         logger.info("  📅 Daily trade limit reached - No more trades today")
+                        logger.info("  ⏹️  MISSION ACCOMPLISHED: Trade Completed. Exiting Bot.")
+                        sys.exit(0)
 
                 time.sleep(POSITION_MONITOR_INTERVAL)
                 continue
