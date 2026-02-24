@@ -11,6 +11,7 @@ NIFTY 50 OPTIONS INTRADAY TRADING BOT - V5.0 LIVE TRADING (TUESDAY EXPIRY)
 import os
 import sys
 import requests
+import threading
 import pandas as pd
 import numpy as np
 import datetime as dt
@@ -24,7 +25,7 @@ import urllib.parse
 
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
-SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTczMjBmNDY4NjczNjUwMWFkNmRiYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzY5MTUyNzU2LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzE3MTEyMDB9.qK0iJ3iye5YR3l7KfTmScaAYdAOMwY-kTlU1lmCn1kc"  # <<-- Add your SANDBOX token here (do not commit to Git)
+SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTljMTk5ODk1M2M5YjFjMDIxNjRjMzAiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzcxODM3ODQ4LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzQzODk2MDB9.2pU16hshwl2MEdLtm8h3XOc6axRlCTmAO0VSKtnYhbo"  # <<-- Add your SANDBOX token here (do not commit to Git)
 LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTlkMWQ1ZTVlMDUxNjJkZmNkZGJmNWYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MTkwNDM1MCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcxOTcwNDAwfQ.4K_r-j_R4Tv4imLHLMKXMG-8iv40dd4E5J2h1qP_LR4"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
@@ -75,12 +76,24 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %I:%M:%S %p',
-    handlers=[
-        logging.FileHandler(TERMINAL_LOG_FILE, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    handlers=[]
 )
 logger = logging.getLogger(__name__)
+
+# File Handler: Gets everything
+file_handler = logging.FileHandler(TERMINAL_LOG_FILE, encoding='utf-8')
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %I:%M:%S %p'))
+logger.addHandler(file_handler)
+
+# Stream Handler (Terminal): Filters out logs tagged with file_only=True
+class NoFileOnlyFilter(logging.Filter):
+    def filter(self, record):
+        return not getattr(record, 'file_only', False)
+
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %I:%M:%S %p'))
+stream_handler.addFilter(NoFileOnlyFilter())
+logger.addHandler(stream_handler)
 
 # ==================== STATE ====================
 last_signal_time = None
@@ -397,14 +410,26 @@ def send_discord_alert(title, description, color=0x00ff00, fields=None):
     }
     if fields:
         embed["fields"] = fields
-    try:
-        r = session.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
-        if r.status_code in (200,204):
-            logger.info("  ✅ Discord alert sent")
-        else:
-            logger.warning(f"  ⚠️ Discord webhook returned {r.status_code}")
-    except Exception as e:
-        logger.error(f"  ❌ Discord send error: {e}")
+        
+    def _send():
+        try:
+            # Using independent requests.post instead of shared Upstox session to avoid pool blocking/timeouts
+            r = requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]}, timeout=20)
+            if r.status_code in (200,204):
+                logger.info("  ✅ Discord alert sent")
+            else:
+                logger.warning(f"  ⚠️ Discord webhook returned {r.status_code}")
+        except requests.exceptions.ReadTimeout:
+            logger.warning("  ⚠️ Discord webhook send timeout (ignored as background task)")
+        except requests.exceptions.ConnectTimeout:
+            logger.warning("  ⚠️ Discord webhook connection timeout (ignored as background task)")
+        except Exception as e:
+            logger.error(f"  ❌ Discord send error: {e}")
+            
+    # Run discord webhook asynchronously so it doesn't block the main trading loop or exit logic
+    t = threading.Thread(target=_send, daemon=True)
+    t.start()
+    return t
 
 # ==================== DATA FETCHING & PARSING ====================
 def get_spot_price():
@@ -704,6 +729,10 @@ class Position:
         if pnl <= -STOP_LOSS:
             return True, f"STOP LOSS (Loss: ₹{abs(pnl):.2f})", pnl, diff
 
+        # 1.5. PROFIT LOCK (700 -> 200 reversal)
+        if self.highest_pnl >= 700.0 and pnl <= 200.0:
+            return True, f"PROFIT LOCK (Reached ₹700, hit ₹200 lock)", pnl, diff
+
         # 2. TAKE PROFIT -> ACTIVATE TRAILING
         if pnl >= TAKE_PROFIT:
             if not self.trailing_stop_active:
@@ -997,11 +1026,11 @@ def main():
             iteration += 1
             now = get_now_kolkata()
 
-
-
-            logger.info("\n" + "="*85)
-            logger.info(f"⏰ [{now.strftime('%d-%b-%Y %I:%M:%S %p')}] Iteration #{iteration}")
-            logger.info("="*85)
+            # If not in an open position, log the Iteration banner to terminal & file
+            if not open_position:
+                logger.info("\n" + "="*85)
+                logger.info(f"⏰ [{now.strftime('%d-%b-%Y %I:%M:%S %p')}] Iteration #{iteration}")
+                logger.info("="*85)
 
             # Market not open
             if now.hour < 9 or (now.hour == 9 and now.minute < 15):
@@ -1066,7 +1095,13 @@ def main():
 
                     # Compact single-line status for 1-second updates
                     trail_info = f" | Trail: ₹{open_position.trailing_stop_price:.2f}" if open_position.trailing_stop_active else ""
-                    print(f"\r   ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}    ", end="", flush=True)
+                    current_time_str = now.strftime('%I:%M:%S %p')
+                    
+                    # Print to terminal with carriage return (updates in place)
+                    print(f"\r   ⏰ [{current_time_str}] ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}    ", end="", flush=True)
+                    
+                    # Log to file normally line-by-line (bypasses terminal stream handler)
+                    logger.info(f"   ⏰ [{current_time_str}] ⚡ LTP: ₹{current_premium:.2f} | P&L: ₹{pnl:+.2f}{trail_info}", extra={'file_only': True})
 
                     should_exit, exit_reason, final_pnl, final_premium_diff = open_position.check_exit(current_premium)
 
@@ -1141,7 +1176,7 @@ def main():
                         log_trade_to_csv(timestamp, f"EXIT {open_position.signal_type}", open_position.strike,
                                        current_premium, 0, 0, 0, 0, "", exit_reason, final_pnl, final_premium_diff)
 
-                        send_discord_alert(
+                        discord_thread = send_discord_alert(
                             f"🔔 {exit_reason}",
                             f"**{open_position.signal_type}** | Strike: {open_position.strike}\nReason: {exit_reason}",
                             0xff0000 if final_pnl < 0 else 0x00ff00,
@@ -1158,6 +1193,11 @@ def main():
                         trade_completed_today = True  # One trade per day - done for today
                         logger.info("  📅 Daily trade limit reached - No more trades today")
                         logger.info("  ⏹️  MISSION ACCOMPLISHED: Trade Completed. Exiting Bot.")
+                        
+                        # Ensure the final discord alert has time to send before exiting
+                        if discord_thread:
+                            discord_thread.join(timeout=5.0)
+                            
                         sys.exit(0)
 
                 time.sleep(POSITION_MONITOR_INTERVAL)
