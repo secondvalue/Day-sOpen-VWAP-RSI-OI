@@ -26,7 +26,7 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OTljMTk5ODk1M2M5YjFjMDIxNjRjMzAiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzcxODM3ODQ4LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzQzODk2MDB9.2pU16hshwl2MEdLtm8h3XOc6axRlCTmAO0VSKtnYhbo"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWE1MDVjOTBhNzVjMjdiMzM1MGZkN2QiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MjQyMjYwMSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcyNDg4ODAwfQ.RMcTFaXiFAl0BpC8qLHcNyhTonSBg-rHOOp1l_VCijg"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWE3YThjOTYwMmIwMDE5ZDI2OGQ5MWYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3MjU5NTQwMSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzcyNjYxNjAwfQ.G1l_OeapbUs2KXx1_S6VbcIiP_Qf7O0PcQtll1gu9vA"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1412386951474057299/Jgft_nxzGxcfWOhoLbSWMde-_bwapvqx8l3VQGQwEoR7_8n4b9Q9zN242kMoXsVbLdvG"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
