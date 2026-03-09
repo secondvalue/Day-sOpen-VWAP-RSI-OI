@@ -59,7 +59,7 @@ TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 MIN_5MIN_BARS = 1
 
 # ==================== POLLING INTERVALS ====================
-SIGNAL_CHECK_INTERVAL = 60    # seconds - interval when waiting for signals (SLOWER: 60s)
+SIGNAL_CHECK_INTERVAL = 10    # seconds - interval when waiting for signals
 POSITION_MONITOR_INTERVAL = 1 # seconds - interval when position is open (faster for trailing)
 
 TRADE_LOGS_DIR = "trade_logs"
@@ -1416,10 +1416,8 @@ def main():
             if open_position:
                 continue
                 
-            # Sync to next minute (00 seconds) for clean candle alignment
-            sleep_sec = 60 - get_now_kolkata().second
-            # logger.info(f"⏳ Waiting {sleep_sec}s for next minute candle...")
-            time.sleep(sleep_sec)
+            # Check signal every 10 seconds
+            time.sleep(SIGNAL_CHECK_INTERVAL)
 
     except KeyboardInterrupt:
         logger.info("\n\n" + "="*85)
