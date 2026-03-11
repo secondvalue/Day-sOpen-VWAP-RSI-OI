@@ -730,8 +730,8 @@ class Position:
             return True, f"STOP LOSS (Loss: ₹{abs(pnl):.2f})", pnl, diff
 
         # 1.5. PROFIT LOCK (700 -> 200 reversal)
-        if self.highest_pnl >= 700.0 and pnl <= 200.0:
-            return True, f"PROFIT LOCK (Reached ₹700, hit ₹200 lock)", pnl, diff
+        if self.highest_pnl >= 700.0 and pnl <= 350.0:
+            return True, f"PROFIT LOCK (Reached ₹700, hit ₹350 lock)", pnl, diff
 
         # 2. TAKE PROFIT -> ACTIVATE TRAILING
         if pnl >= TAKE_PROFIT:
@@ -1129,7 +1129,6 @@ def main():
                                 logger.warning(f"  ⚠️ SL Cancel failed: {cancel_msg}")
                         # ============================================================
                         
-                        logger.info(f"  Entry:       ₹{open_position.entry_premium:.2f}")
                         # ===== LIVE ORDER: EXIT AT SL/TP/TRAILING =====
                         # Only place exit order if SL didn't trigger on exchange
                         if "STOP LOSS" not in exit_reason or not open_position.sl_order_id:
