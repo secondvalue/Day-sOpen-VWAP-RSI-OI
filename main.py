@@ -57,7 +57,7 @@ STOP_LOSS = 1000.0     # Fixed Stop Loss (exit if loss > ₹1500)
 TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 # New: Trigger opposite signal when condition met (e.g., if CE conditions met, buy PE)
-TRIGGER_OPPOSITE_SIGNAL = True
+TRIGGER_OPPOSITE_SIGNAL = False
 
 MIN_5MIN_BARS = 1
 
