@@ -26,7 +26,7 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWMzNTc5OTAwZDhjZDA4MDY5N2U4YTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzc0NDA5NjI1LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzY5ODE2MDB9.8sjFGQR5TUAOf7S0fjegqSk7-sGyJl54SOBiUM81fWQ"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWZhYjllYmFjMDkxNDIyMTQ0ODNhYTMiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3ODAzOTI3NSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc4MTA0ODAwfQ.ItZhOTxFJRiLw-yba315XI0bAA-48gQGpfCf0S9LfRw"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWZjMDk3ZWRjNjk2YjM2MTY5ZjQ3ZjQiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3ODEyNTE4MiwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc4MTkxMjAwfQ.Ix0mNMwC4wryH_HpZX-jJn6WlAAVdYa3YkKISvzyB50"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501190556049473576/p0p2RfZAnI42BHGPB73eUHMEeaWIgO-x265-gw8VNcu-umlFA_P19n181DL6cKAFZnLg"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
@@ -57,7 +57,7 @@ STOP_LOSS = 1000.0     # Fixed Stop Loss (exit if loss > ₹1500)
 TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 # New: Trigger opposite signal when condition met (e.g., if CE conditions met, buy PE)
-TRIGGER_OPPOSITE_SIGNAL = False
+TRIGGER_OPPOSITE_SIGNAL = True
 
 MIN_5MIN_BARS = 1
 
