@@ -26,7 +26,7 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWMzNTc5OTAwZDhjZDA4MDY5N2U4YTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzc0NDA5NjI1LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzY5ODE2MDB9.8sjFGQR5TUAOf7S0fjegqSk7-sGyJl54SOBiUM81fWQ"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTAxNTcwN2RiNzU0NjZjODE1YzRmYTciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3ODQ3MjcxMSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc4NTM2ODAwfQ.NMiU-yxgEBx8-UwPQoG0qUg_o3S3ctk785jNr4FiLvI"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTAyOWU1MjUyMDMyMTVlNjQ1N2Y2NzciLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3ODU1NjQ5OCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc4NjIzMjAwfQ.RgJVuE8oy_gMfViwwdv5U_A8AaEH4D4D5Es2MAcfGi0"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501190556049473576/p0p2RfZAnI42BHGPB73eUHMEeaWIgO-x265-gw8VNcu-umlFA_P19n181DL6cKAFZnLg"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
@@ -53,11 +53,11 @@ LOT_SIZE = 65             # NIFTY 50 lot size
 
 # ==================== RISK MANAGEMENT (FIXED) ====================
 TAKE_PROFIT = 1000.0    # Activates Trailing Stop when profit reaches ₹500
-STOP_LOSS = 1000.0     # Fixed Stop Loss (exit if loss > ₹1500)
+STOP_LOSS = 500.0     # Fixed Stop Loss (exit if loss > ₹1500)
 TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
 
 # New: Trigger opposite signal when condition met (e.g., if CE conditions met, buy PE)
-TRIGGER_OPPOSITE_SIGNAL = False
+TRIGGER_OPPOSITE_SIGNAL = True
 
 MIN_5MIN_BARS = 1
 
