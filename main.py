@@ -56,6 +56,7 @@ ENABLE_PROFIT_LOCK = False        # Toggle: Set to True to enable profit lock, F
 TRIGGER_OPPOSITE_SIGNAL = False   # Toggle: Set to True to trade opposite signal when condition met, False to disable
 ENABLE_MULTIPLE_TRADES = True     # Toggle: Set to True to enable multiple trades per day, False for single trade
 ENABLE_DAILY_PROFIT_LOCK = False  # Toggle: Set to True to stop bot when ₹3000 target profit is reached, False to disable
+ENABLE_CONSECUTIVE_SL_LOCK = True  # Toggle: Set to True to stop bot if consecutive Stop Losses hit, False to disable
 
 
 # ==================== RISK MANAGEMENT (LOT-SCALE SCALED) ====================
@@ -80,6 +81,7 @@ PROFIT_LOCK_LIMIT = BASE_PROFIT_LOCK_LIMIT * SCALING_FACTOR
 # Strategy Settings
 MAX_TRADES_PER_DAY = 5        # <<-- Maximum trades allowed per day if multiple trades are enabled
 DAILY_PROFIT_TARGET = 3000.0   # Target daily overall profit amount
+MAX_CONSECUTIVE_SL = 2         # <<-- Stop trading for the day if consecutive SL hits this limit
 MIN_5MIN_BARS = 1
 
 # ==================== POLLING INTERVALS ====================
@@ -130,6 +132,7 @@ last_oi_delta = {'ce': 0, 'pe': 0}
 trade_completed_today = False   # Flag indicating daily limit reached
 trades_completed_today = 0      # Track number of trades completed today
 total_pnl_today = 0.0          # Track cumulative daily profit/loss
+consecutive_sl_count = 0        # Track consecutive Stop Loss hits
 option_instruments = []         # Preloaded option instruments key list
 cpr_levels = None               # CPR Levels dictionary (calculated once at startup)
 
@@ -930,6 +933,7 @@ Target:      ₹{TAKE_PROFIT:.2f} (Base: ₹{BASE_TAKE_PROFIT:.2f} | ~{TAKE_PROF
 Trailing:    ₹{TRAILING_STOP:.2f} Step (Base: ₹{BASE_TRAILING_STOP:.2f} | ~{TRAILING_STOP/LOT_SIZE:.2f} pts)
 Profit Lock: {'Reached ₹' + f'{PROFIT_LOCK_TRIGGER:.2f}' + ' -> Lock in ₹' + f'{PROFIT_LOCK_LIMIT:.2f}' if ENABLE_PROFIT_LOCK else 'DISABLED ❌'}
 Daily Profit Target: ₹{DAILY_PROFIT_TARGET:.2f} ({'ENABLED ✅' if ENABLE_DAILY_PROFIT_LOCK else 'DISABLED ❌'})
+Consecutive SL Limit: {MAX_CONSECUTIVE_SL} ({'ENABLED ✅' if ENABLE_CONSECUTIVE_SL_LOCK else 'DISABLED ❌'})
 Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
 Opposite:    {'ENABLED ✅' if TRIGGER_OPPOSITE_SIGNAL else 'DISABLED ❌'}
 Protection:  Exchange SL Order
@@ -1212,7 +1216,7 @@ def fetch_live_spot_candles(symbol):
 
 # ==================== MAIN LOOP ====================
 def main():
-    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache, trade_completed_today, trades_completed_today, option_instruments, cpr_levels, total_pnl_today
+    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache, trade_completed_today, trades_completed_today, option_instruments, cpr_levels, total_pnl_today, consecutive_sl_count
 
     with open(CSV_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -1322,6 +1326,7 @@ def main():
                 trade_completed_today = False  # Reset for next day
                 trades_completed_today = 0     # Reset count for next day
                 total_pnl_today = 0.0          # Reset daily PnL for next day
+                consecutive_sl_count = 0       # Reset consecutive SL hits for next day
                 time.sleep(60)
                 continue
 
@@ -1489,6 +1494,29 @@ def main():
                         logger.info(f"  📅 Trade #{trades_completed_today} completed today.")
                         logger.info(f"  📊 Cumulative Daily P&L: ₹{total_pnl_today:.2f}")
 
+                        # Update consecutive SL count
+                        if "STOP LOSS" in exit_reason:
+                            consecutive_sl_count += 1
+                            logger.warning(f"  ⚠️ Stop Loss hit! Consecutive SL count: {consecutive_sl_count}/{MAX_CONSECUTIVE_SL}")
+                        else:
+                            consecutive_sl_count = 0  # Reset on any profit/trailing/manual exit
+
+                        # Check if consecutive Stop Loss limit reached
+                        if ENABLE_CONSECUTIVE_SL_LOCK and consecutive_sl_count >= MAX_CONSECUTIVE_SL:
+                            logger.warning(f"  🚨 CONSECUTIVE STOP LOSS LIMIT REACHED! {consecutive_sl_count} consecutive SL hits.")
+                            logger.warning("  ⏹️  STOPPING BOT FOR THE DAY to prevent further losses.")
+                            
+                            sl_limit_discord_thread = send_discord_alert(
+                                "🚨 Consecutive SL Limit Reached!",
+                                f"{consecutive_sl_count} consecutive trades hit Stop Loss. Stopping the bot for the day to prevent further losses.",
+                                0xff0000
+                            )
+                            if sl_limit_discord_thread:
+                                sl_limit_discord_thread.join(timeout=5.0)
+                            if discord_thread:
+                                discord_thread.join(timeout=5.0)
+                            sys.exit(0)
+
                         # Check if target daily profit reached
                         if ENABLE_DAILY_PROFIT_LOCK and total_pnl_today >= DAILY_PROFIT_TARGET:
                             logger.info(f"  🏆 DAILY PROFIT TARGET REACHED! Cumulative P&L: ₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}")
@@ -1558,6 +1586,11 @@ def main():
             # Check if daily profit target reached
             if ENABLE_DAILY_PROFIT_LOCK and total_pnl_today >= DAILY_PROFIT_TARGET:
                 logger.info(f"\n🏆 DAILY PROFIT TARGET MET (₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}) - Stopping Bot.")
+                sys.exit(0)
+
+            # Check if consecutive Stop Loss limit reached
+            if ENABLE_CONSECUTIVE_SL_LOCK and consecutive_sl_count >= MAX_CONSECUTIVE_SL:
+                logger.info(f"\n🚨 CONSECUTIVE STOP LOSS LIMIT MET ({consecutive_sl_count} consecutive SL hits) - Stopping Bot.")
                 sys.exit(0)
 
             # Check if daily trade limit reached
