@@ -51,6 +51,13 @@ SIGNAL_COOLDOWN = 600     # seconds
 LOT_SIZE = 260             # NIFTY 50 lot size
 
 
+# ==================== GLOBAL STRATEGY TOGGLES ====================
+ENABLE_PROFIT_LOCK = False        # Toggle: Set to True to enable profit lock, False to disable it
+TRIGGER_OPPOSITE_SIGNAL = False   # Toggle: Set to True to trade opposite signal when condition met, False to disable
+ENABLE_MULTIPLE_TRADES = True     # Toggle: Set to True to enable multiple trades per day, False for single trade
+ENABLE_DAILY_PROFIT_LOCK = False  # Toggle: Set to True to stop bot when ₹3000 target profit is reached, False to disable
+
+
 # ==================== RISK MANAGEMENT (LOT-SCALE SCALED) ====================
 BASE_LOT_SIZE = 65          # Base lot size for which the below parameters are defined (e.g., 1 lot = 65 quantity)
 SCALING_FACTOR = LOT_SIZE / BASE_LOT_SIZE
@@ -60,7 +67,6 @@ BASE_TAKE_PROFIT = 500.0    # Activates Trailing Stop when profit reaches ₹500
 BASE_STOP_LOSS = 500.0      # Fixed Stop Loss (exit if loss > ₹500)
 BASE_TRAILING_STOP = 300.0   # Trailing Step (lock profit in ₹300 chunks)
 
-ENABLE_PROFIT_LOCK = False  # Toggle: Set to True to enable profit lock, False to disable it
 BASE_PROFIT_LOCK_TRIGGER = 350.0  # Reached ₹350 profit
 BASE_PROFIT_LOCK_LIMIT = 150.0    # Lock in ₹150 profit on retracement
 
@@ -71,15 +77,9 @@ TRAILING_STOP = BASE_TRAILING_STOP * SCALING_FACTOR
 PROFIT_LOCK_TRIGGER = BASE_PROFIT_LOCK_TRIGGER * SCALING_FACTOR
 PROFIT_LOCK_LIMIT = BASE_PROFIT_LOCK_LIMIT * SCALING_FACTOR
 
-# New: Trigger opposite signal when condition met (e.g., if CE conditions met, buy PE)
-TRIGGER_OPPOSITE_SIGNAL = False
-
-ENABLE_MULTIPLE_TRADES = True  # <<-- Toggle: True to enable multiple trades per day, False for single trade per day
+# Strategy Settings
 MAX_TRADES_PER_DAY = 5        # <<-- Maximum trades allowed per day if multiple trades are enabled
-
-# Daily Profit Target: if reached, stop the bot (no more trades)
-ENABLE_DAILY_PROFIT_LOCK = False  # Toggle: Set to True to enable 3000 profit lock (stops bot), False to disable
-DAILY_PROFIT_TARGET = 3000.0
+DAILY_PROFIT_TARGET = 3000.0   # Target daily overall profit amount
 MIN_5MIN_BARS = 1
 
 # ==================== POLLING INTERVALS ====================
@@ -387,6 +387,43 @@ def check_order_status(order_id):
     except Exception as e:
         logger.error(f"  ❌ Check Order Status Error: {e}")
         pass
+        
+    return None
+
+def get_order_average_price(order_id):
+    """
+    Fetch the actual average execution price of an order from Upstox.
+    If paper trade or fails, returns None.
+    """
+    if not LIVE_TRADING or not order_id or str(order_id).startswith("PAPER"):
+        return None
+
+    if SANDBOX_MODE:
+        url = "https://api-sandbox.upstox.com/v2/order/history"
+    else:
+        url = "https://api.upstox.com/v2/order/history"
+    
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {ORDER_ACCESS_TOKEN}"
+    }
+    params = {"order_id": order_id}
+
+    try:
+        r = session.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            order_history = data.get('data', [])
+            for entry in order_history:
+                status = str(entry.get('status') or '').lower()
+                if status == 'complete':
+                    avg_price = entry.get('average_price')
+                    if avg_price is not None and float(avg_price) > 0:
+                        return float(avg_price)
+        else:
+            logger.error(f"  ❌ Get Order Details Failed. Status: {r.status_code}, Response: {r.text}")
+    except Exception as e:
+        logger.error(f"  ❌ Get Order Average Price Error: {e}")
         
     return None
 
@@ -1242,6 +1279,21 @@ def main():
                         if exit_success:
                             open_position.exit_order_id = exit_order_id
                             logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
+                            
+                            # Wait for close order to fill and adjust for slippage
+                            if not str(exit_order_id).startswith("PAPER"):
+                                logger.info("  ⏳ Waiting for Market Close exit order to complete...")
+                                for _ in range(20):
+                                    status = check_order_status(exit_order_id)
+                                    if status == 'complete':
+                                        break
+                                    time.sleep(0.5)
+                                
+                                avg_exit_premium = get_order_average_price(exit_order_id)
+                                if avg_exit_premium is not None:
+                                    logger.info(f"  📝 Slippage Adjusted Market Close: pre-trade quote was ₹{current_premium:.2f}, actual filled average price is ₹{avg_exit_premium:.2f}")
+                                    current_premium = avg_exit_premium
+                                    pnl, premium_diff = open_position.calculate_pnl(current_premium)
                         else:
                             logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
                             
@@ -1394,6 +1446,21 @@ def main():
                                 logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
                         # ==============================================
                         
+                        # Fetch the actual average execution price from exchange to account for slippage
+                        if exit_order_placed and exit_order_id and not str(exit_order_id).startswith("PAPER"):
+                            logger.info("  ⏳ Waiting for EXIT order to complete...")
+                            for _ in range(20):
+                                status = check_order_status(exit_order_id)
+                                if status == 'complete':
+                                    break
+                                time.sleep(0.5)
+                            
+                            avg_exit_premium = get_order_average_price(exit_order_id)
+                            if avg_exit_premium is not None:
+                                logger.info(f"  📝 Slippage Adjusted Exit: pre-trade quote was ₹{current_premium:.2f}, actual filled average price is ₹{avg_exit_premium:.2f}")
+                                current_premium = avg_exit_premium
+                                final_pnl, final_premium_diff = open_position.calculate_pnl(current_premium)
+
                         logger.info(f"  Entry:       ₹{open_position.entry_premium:.2f}")
                         logger.info(f"  Exit:        ₹{current_premium:.2f}")
                         logger.info(f"  Premium Diff: ₹{final_premium_diff:.2f}")
@@ -1615,6 +1682,22 @@ def main():
 
                             
                     # Create Position object (Fixed Risk)
+                    avg_entry_premium = None
+                    if LIVE_TRADING and not str(order_id).startswith("PAPER"):
+                        logger.info("  ⏳ Fetching actual entry fill price from exchange order history...")
+                        for attempt in range(1, 6):
+                            avg_entry_premium = get_order_average_price(order_id)
+                            if avg_entry_premium is not None:
+                                break
+                            logger.warning(f"  ⚠️ Attempt {attempt}/5: Failed to fetch average price from exchange. Retrying in 1s...")
+                            time.sleep(1)
+
+                    if avg_entry_premium is not None:
+                        logger.info(f"  📝 Slippage Adjusted: pre-trade quote was ₹{premium:.2f}, actual filled average price is ₹{avg_entry_premium:.2f}")
+                        premium = avg_entry_premium
+                    elif LIVE_TRADING and not str(order_id).startswith("PAPER"):
+                        logger.critical("  🚨 COULD NOT FETCH AVERAGE EXECUTION PRICE FROM EXCHANGE AFTER RETRIES! Fallback to pre-trade quote for SL trigger calculation.")
+
                     open_position = Position(signal, strike, premium, instrument_key, timestamp, entry_order_id=order_id)
                     
                     logger.info(f"  ✅ BUY position confirmed. Entry Price: {premium}")
