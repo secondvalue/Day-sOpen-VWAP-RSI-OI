@@ -26,13 +26,13 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWMzNTc5OTAwZDhjZDA4MDY5N2U4YTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzc0NDA5NjI1LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzY5ODE2MDB9.8sjFGQR5TUAOf7S0fjegqSk7-sGyJl54SOBiUM81fWQ"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTFjZmI4NjcxMzVmZjU2YzY0NzRmYzUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MDI4NDI5NCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgwMzUxMjAwfQ.LoTcxq1rsrGSzmS6ZibMJIKF1I0ODdkYqMsWx6pWbYU"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTFkMDA3NTMwNWE2MjI1MTc2YmRlN2UiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MDI4NTU1NywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgwMzUxMjAwfQ.Kd73rGOfTgbb_vuMRdzOiBpbonJERZXajOdY4uL2Wgg"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501190556049473576/p0p2RfZAnI42BHGPB73eUHMEeaWIgO-x265-gw8VNcu-umlFA_P19n181DL6cKAFZnLg"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
-SANDBOX_MODE = False            # <<-- SET TO True FOR SANDBOX TESTING
-LIVE_TRADING = True         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
+SANDBOX_MODE = True            # <<-- SET TO True FOR SANDBOX TESTING
+LIVE_TRADING = False         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
 
 # Separate tokens for Data (Live) and Orders (Sandbox/Live)
 DATA_ACCESS_TOKEN = LIVE_ACCESS_TOKEN
