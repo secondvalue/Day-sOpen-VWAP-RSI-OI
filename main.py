@@ -1508,16 +1508,12 @@ def main():
                         limit = MAX_TRADES_PER_DAY if ENABLE_MULTIPLE_TRADES else 1
                         if trades_completed_today >= limit:
                             trade_completed_today = True
-                            if ENABLE_MULTIPLE_TRADES:
-                                logger.info(f"  📅 Daily trade limit of {limit} reached - No more trades today.")
-                                logger.info("  ⏹️  Daily limit reached. Bot will remain active in monitor-only mode.")
-                            else:
-                                logger.info("  📅 Daily trade limit (1 trade) reached - No more trades today.")
-                                logger.info("  ⏹️  MISSION ACCOMPLISHED: Trade Completed. Exiting Bot.")
-                                # Ensure the final discord alert has time to send before exiting
-                                if discord_thread:
-                                    discord_thread.join(timeout=5.0)
-                                sys.exit(0)
+                            logger.info(f"  📅 Daily trade limit of {limit} reached - No more trades today.")
+                            logger.info("  ⏹️  MISSION ACCOMPLISHED: Daily Trade Limit Met. Exiting Bot.")
+                            # Ensure the final discord alert has time to send before exiting
+                            if discord_thread:
+                                discord_thread.join(timeout=5.0)
+                            sys.exit(0)
                         else:
                             logger.info(f"  🔄 Bot remains active. Cooldown active for {SIGNAL_COOLDOWN}s. Waiting for the next signal...")
 
