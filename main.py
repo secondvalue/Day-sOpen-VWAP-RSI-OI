@@ -78,7 +78,7 @@ ENABLE_MULTIPLE_TRADES = True  # <<-- Toggle: True to enable multiple trades per
 MAX_TRADES_PER_DAY = 5        # <<-- Maximum trades allowed per day if multiple trades are enabled
 
 # Daily Profit Target: if reached, stop the bot (no more trades)
-ENABLE_DAILY_PROFIT_LOCK = True  # Toggle: Set to True to enable 3000 profit lock (stops bot), False to disable
+ENABLE_DAILY_PROFIT_LOCK = False  # Toggle: Set to True to enable 3000 profit lock (stops bot), False to disable
 DAILY_PROFIT_TARGET = 3000.0
 MIN_5MIN_BARS = 1
 
