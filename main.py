@@ -26,13 +26,13 @@ import urllib.parse
 # ==================== CONFIGURATION ====================
 # Dual token support: Use SANDBOX token for testing, LIVE token for production
 SANDBOX_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2OWMzNTc5OTAwZDhjZDA4MDY5N2U4YTYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6dHJ1ZSwiaWF0IjoxNzc0NDA5NjI1LCJpc3MiOiJ1ZGFwaS1nYXRld2F5LXNlcnZpY2UiLCJleHAiOjE3NzY5ODE2MDB9.8sjFGQR5TUAOf7S0fjegqSk7-sGyJl54SOBiUM81fWQ"  # <<-- Add your SANDBOX token here (do not commit to Git)
-LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTBiZGEwOTM1ODEwZDUyYWFmMmRhOGMiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc3OTE2MTYwOSwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzc5MjI4MDAwfQ.60USXppeR9twZJKVi1NPxOYHBG-h8RqhAvtryJc2Ido"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
+LIVE_ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI1NUJBOVgiLCJqdGkiOiI2YTFjZmI4NjcxMzVmZjU2YzY0NzRmYzUiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MDI4NDI5NCwiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgwMzUxMjAwfQ.LoTcxq1rsrGSzmS6ZibMJIKF1I0ODdkYqMsWx6pWbYU"  # <<-- Add your LIVE Upstox API token here (do not commit to Git)
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1501190556049473576/p0p2RfZAnI42BHGPB73eUHMEeaWIgO-x265-gw8VNcu-umlFA_P19n181DL6cKAFZnLg"
 NIFTY_SYMBOL = "NSE_INDEX|Nifty 50"
 
 # ==================== LIVE TRADING SETTINGS ====================
-SANDBOX_MODE = True         # <<-- SET TO True FOR SANDBOX TESTING
-LIVE_TRADING = False         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
+SANDBOX_MODE = False            # <<-- SET TO True FOR SANDBOX TESTING
+LIVE_TRADING = True         # <<-- SET TO True to send orders (to Sandbox if SANDBOX_MODE=True)
 
 # Separate tokens for Data (Live) and Orders (Sandbox/Live)
 DATA_ACCESS_TOKEN = LIVE_ACCESS_TOKEN
@@ -47,18 +47,38 @@ else:
     ORDER_PLACE_URL = "https://api-hft.upstox.com/v3/order/place"
     ORDER_CANCEL_URL = "https://api-hft.upstox.com/v3/order/cancel"
 
-SIGNAL_COOLDOWN = 300     # seconds
-LOT_SIZE = 65             # NIFTY 50 lot size
+SIGNAL_COOLDOWN = 600     # seconds
+LOT_SIZE = 260             # NIFTY 50 lot size
 
 
-# ==================== RISK MANAGEMENT (FIXED) ====================
-TAKE_PROFIT = 1000.0    # Activates Trailing Stop when profit reaches ₹500
-STOP_LOSS = 500.0     # Fixed Stop Loss (exit if loss > ₹1500)
-TRAILING_STOP = 500.0  # Trailing Step (lock profit in ₹500 chunks)
+# ==================== RISK MANAGEMENT (LOT-SCALE SCALED) ====================
+BASE_LOT_SIZE = 65          # Base lot size for which the below parameters are defined (e.g., 1 lot = 65 quantity)
+SCALING_FACTOR = LOT_SIZE / BASE_LOT_SIZE
+
+# Base parameters (configured for BASE_LOT_SIZE = 65 quantity)
+BASE_TAKE_PROFIT = 500.0    # Activates Trailing Stop when profit reaches ₹500
+BASE_STOP_LOSS = 500.0      # Fixed Stop Loss (exit if loss > ₹500)
+BASE_TRAILING_STOP = 300.0   # Trailing Step (lock profit in ₹300 chunks)
+
+ENABLE_PROFIT_LOCK = False  # Toggle: Set to True to enable profit lock, False to disable it
+BASE_PROFIT_LOCK_TRIGGER = 350.0  # Reached ₹350 profit
+BASE_PROFIT_LOCK_LIMIT = 150.0    # Lock in ₹150 profit on retracement
+
+# Scaled parameters (automatically scaled for current LOT_SIZE)
+TAKE_PROFIT = BASE_TAKE_PROFIT * SCALING_FACTOR
+STOP_LOSS = BASE_STOP_LOSS * SCALING_FACTOR
+TRAILING_STOP = BASE_TRAILING_STOP * SCALING_FACTOR
+PROFIT_LOCK_TRIGGER = BASE_PROFIT_LOCK_TRIGGER * SCALING_FACTOR
+PROFIT_LOCK_LIMIT = BASE_PROFIT_LOCK_LIMIT * SCALING_FACTOR
 
 # New: Trigger opposite signal when condition met (e.g., if CE conditions met, buy PE)
 TRIGGER_OPPOSITE_SIGNAL = False
 
+ENABLE_MULTIPLE_TRADES = True  # <<-- Toggle: True to enable multiple trades per day, False for single trade per day
+MAX_TRADES_PER_DAY = 5        # <<-- Maximum trades allowed per day if multiple trades are enabled
+
+# Daily Profit Target: if reached, stop the bot (no more trades)
+DAILY_PROFIT_TARGET = 3000.0
 MIN_5MIN_BARS = 1
 
 # ==================== POLLING INTERVALS ====================
@@ -106,7 +126,11 @@ open_position = None
 days_open_cache = None
 last_oi_snapshot = {'ce': 0, 'pe': 0}
 last_oi_delta = {'ce': 0, 'pe': 0}
-trade_completed_today = False   # One trade per day limit
+trade_completed_today = False   # Flag indicating daily limit reached
+trades_completed_today = 0      # Track number of trades completed today
+total_pnl_today = 0.0          # Track cumulative daily profit/loss
+option_instruments = []         # Preloaded option instruments key list
+cpr_levels = None               # CPR Levels dictionary (calculated once at startup)
 
 # ==================== HTTP SESSION ====================
 session = requests.Session()
@@ -549,6 +573,9 @@ def get_live_oi_from_quotes(instrument_keys):
     ce_oi_total = 0
     pe_oi_total = 0
     batch_size = 80
+    
+    total_requested = len(instrument_keys)
+    total_received = 0
 
     for i in range(0, len(instrument_keys), batch_size):
         batch = instrument_keys[i:i+batch_size]
@@ -558,9 +585,10 @@ def get_live_oi_from_quotes(instrument_keys):
         try:
             r = session.get(url, headers=headers, timeout=10)
             if r.status_code != 200:
-                logger.debug(f"  ⚠️ Quotes batch returned {r.status_code}")
+                logger.warning(f"  ⚠️ Quotes batch returned {r.status_code}")
                 continue
             data = r.json().get('data', {})
+            total_received += len(data)
             for ik, q in data.items():
                 if not isinstance(q, dict):
                     continue
@@ -575,11 +603,36 @@ def get_live_oi_from_quotes(instrument_keys):
                 elif kind == 'PE':
                     pe_oi_total += oi_value
         except Exception as e:
-            logger.debug(f"  ❌ OI batch error: {e}")
+            logger.warning(f"  ❌ OI batch error: {e}")
             continue
 
     if ce_oi_total == 0 and pe_oi_total == 0:
         return None, 0, 0, 'Neutral'
+
+    # Check if we successfully fetched at least 85% of the instruments to avoid artificial delta jumps
+    if total_requested > 0 and total_received < total_requested * 0.85:
+        logger.warning(f"  ⚠️ OI Fetch incomplete ({total_received}/{total_requested} contracts). Skipping delta update to prevent artificial jumps.")
+        
+        # Fallback using historical snapshots to maintain continuity
+        if last_oi_snapshot.get('ce', 0) > last_oi_snapshot.get('pe', 0):
+            trend = 'Bearish'
+        elif last_oi_snapshot.get('pe', 0) > last_oi_snapshot.get('ce', 0):
+            trend = 'Bullish'
+        else:
+            trend = 'Sideways'
+            
+        delta_ce = last_oi_delta.get('ce', 0)
+        delta_pe = last_oi_delta.get('pe', 0)
+        
+        if trend == 'Bullish' and delta_pe > delta_ce:
+            confirmation = 'Strong Bullish'
+        elif trend == 'Bearish' and delta_ce > delta_pe:
+            confirmation = 'Strong Bearish'
+        else:
+            confirmation = 'Weak / Neutral'
+            
+        logger.info(f"  🧮 [RETAINED] OI Δ (CE: {delta_ce:+,}, PE: {delta_pe:+,}) → Confirmation: {confirmation}")
+        return trend, last_oi_snapshot.get('ce', 0), last_oi_snapshot.get('pe', 0), confirmation
 
     # Interpretation: PE > CE => Bullish (support); CE > PE => Bearish (resistance)
     if pe_oi_total > ce_oi_total * 1.05:
@@ -677,9 +730,9 @@ def is_option_type_match(contract, optype):
     if t in ('PE', 'PUT'):
         return optype == 'PE'
     ik = str(contract.get('instrument_key') or '').upper()
-    if '_CE' in ik or ik.split('|')[-1].startswith('CE'):
+    if '_CE' in ik or ik.split('|')[-1].startswith('CE') or ik.split('|')[-1].endswith('CE') or 'CE' in ik.split('|')[-1]:
         return optype == 'CE'
-    if '_PE' in ik or ik.split('|')[-1].startswith('PE'):
+    if '_PE' in ik or ik.split('|')[-1].startswith('PE') or ik.split('|')[-1].endswith('PE') or 'PE' in ik.split('|')[-1]:
         return optype == 'PE'
     return False
 
@@ -739,9 +792,9 @@ class Position:
         if pnl <= -STOP_LOSS:
             return True, f"STOP LOSS (Loss: ₹{abs(pnl):.2f})", pnl, diff
 
-        # 1.5. PROFIT LOCK (700 -> 200 reversal)
-        if self.highest_pnl >= 700.0 and pnl <= 350.0:
-            return True, f"PROFIT LOCK (Reached ₹700, hit ₹350 lock)", pnl, diff
+        # 1.5. PROFIT LOCK (700 -> 350 reversal, scaled)
+        if ENABLE_PROFIT_LOCK and self.highest_pnl >= PROFIT_LOCK_TRIGGER and pnl <= PROFIT_LOCK_LIMIT:
+            return True, f"PROFIT LOCK (Reached ₹{PROFIT_LOCK_TRIGGER:.2f}, hit ₹{PROFIT_LOCK_LIMIT:.2f} lock)", pnl, diff
 
         # 2. TAKE PROFIT -> ACTIVATE TRAILING
         if pnl >= TAKE_PROFIT:
@@ -774,8 +827,7 @@ class Position:
 
         return False, None, pnl, diff
 
-# ==================== SIGNAL LOGIC ====================
-def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation):
+def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation, cpr_levels):
     conditions = {
         'CE': {
             'price_above_open': spot > day_open,
@@ -807,7 +859,7 @@ def check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_confirmation
 
 
 # ==================== DISPLAY & LOGGING ====================
-def print_startup_banner():
+def print_startup_banner(cpr_levels=None):
     session_time = get_now_kolkata().strftime('%Y-%m-%d %I:%M:%S %p')
     trading_mode = "🔴 LIVE TRADING" if LIVE_TRADING else "📝 PAPER TRADING"
     sandbox_status = "🧪 SANDBOX MODE ENABLED" if SANDBOX_MODE else ""
@@ -815,35 +867,53 @@ def print_startup_banner():
         logger.info(f"\n{'=' * 85}")
         logger.info("🧪 SANDBOX MODE ENABLED - Using test environment (V3 API)")
         logger.info(f"{'=' * 85}\n")
+        
+    cpr_str = "N/A"
+    if cpr_levels:
+        cpr_str = f"TC={cpr_levels['TC']:.2f} | Pivot={cpr_levels['Pivot']:.2f} | BC={cpr_levels['BC']:.2f} ({cpr_levels['type']})"
+
     banner = f"""
 {'=' * 85}
 🚀 NIFTY 50 OPTIONS INTRADAY TRADING BOT - V5.0 LIVE EXECUTION
 {'=' * 85}
 Mode:        {trading_mode}{' | ' + sandbox_status if sandbox_status else ''}
-Strategy:    Day's Open + VWAP + RSI + OI + OI-Delta Confirmation
+Strategy:    Day's Open + VWAP + RSI + OI + OI-Delta + CPR Strategy
+CPR Levels:  {cpr_str}
 Timeframe:   5-Minute Candles (1-min resampled)
 Data Source: Live from NSE via Upstox API
 Session:     {session_time}
 Trade Log:   {CSV_FILE}
 Terminal Log: {TERMINAL_LOG_FILE}
 Expiry:      {current_expiry_date}
-Lot Size:    {LOT_SIZE} quantity
-Desc:        Fixed Risk Management
-Stop Loss:   ₹{STOP_LOSS} (Exchange Order)
-Target:      ₹{TAKE_PROFIT} (Activates Trailing)
-Trailing:    ₹{TRAILING_STOP} Step
+Lot Size:    {LOT_SIZE} quantity (Base: {BASE_LOT_SIZE} | Scale: {SCALING_FACTOR:.2f}x)
+Desc:        Lot-Scaled Rupee Risk Management
+Stop Loss:   ₹{STOP_LOSS:.2f} (Base: ₹{BASE_STOP_LOSS:.2f} | ~{STOP_LOSS/LOT_SIZE:.2f} pts)
+Target:      ₹{TAKE_PROFIT:.2f} (Base: ₹{BASE_TAKE_PROFIT:.2f} | ~{TAKE_PROFIT/LOT_SIZE:.2f} pts)
+Trailing:    ₹{TRAILING_STOP:.2f} Step (Base: ₹{BASE_TRAILING_STOP:.2f} | ~{TRAILING_STOP/LOT_SIZE:.2f} pts)
+Profit Lock: {'Reached ₹' + f'{PROFIT_LOCK_TRIGGER:.2f}' + ' -> Lock in ₹' + f'{PROFIT_LOCK_LIMIT:.2f}' if ENABLE_PROFIT_LOCK else 'DISABLED ❌'}
+Daily Profit Target: ₹{DAILY_PROFIT_TARGET:.2f} (Bot stops if hit)
 Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
 Opposite:    {'ENABLED ✅' if TRIGGER_OPPOSITE_SIGNAL else 'DISABLED ❌'}
 Protection:  Exchange SL Order
 
 ✅ NEW: Live Order Execution via Upstox API
 ✅ NEW: Exchange Stop Loss Protection
-✅ NEW: One trade per day limit
+✅ NEW: Multiple trades per day: {'ENABLED ✅ (Max: ' + str(MAX_TRADES_PER_DAY) + ')' if ENABLE_MULTIPLE_TRADES else 'DISABLED ❌ (Max: 1)'}
 {'=' * 85}
 """
     logger.info(banner)
 
-def print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe):
+def print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe, cpr_levels=None):
+    cpr_info = "N/A"
+    if cpr_levels:
+        if spot > cpr_levels['TC']:
+            pos = "ABOVE TC"
+        elif spot < cpr_levels['BC']:
+            pos = "BELOW BC"
+        else:
+            pos = "INSIDE CPR"
+        cpr_info = f"TC={cpr_levels['TC']:.2f} | BC={cpr_levels['BC']:.2f} ({pos})"
+
     snapshot = f"""
 📊 MARKET SNAPSHOT
 {'-' * 85}
@@ -851,6 +921,7 @@ def print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe):
   VWAP:          {vwap:8.2f}  |  Position:     {'ABOVE ✅' if spot > vwap else 'BELOW ❌'}
   RSI:           {rsi:8.2f}  |  Momentum:     {get_rsi_label(rsi)}
   OI Trend:      {oi_trend:>8}  |  CE OI: {oi_ce:,} | PE OI: {oi_pe:,}
+  CPR Status:    {cpr_info}
 """
     logger.info(snapshot)
 
@@ -902,6 +973,88 @@ def log_trade_to_csv(timestamp, signal, strike, premium, spot, rsi, vwap, day_op
             round(pnl, 2) if pnl is not None else "",
             round(premium_diff, 2) if premium_diff is not None else ""
         ])
+
+# ==================== GET CPR LEVELS ====================
+def get_cpr_levels():
+    global TRIGGER_OPPOSITE_SIGNAL
+    try:
+        encoded_symbol = encode_symbol(NIFTY_SYMBOL)
+        headers = {"accept": "application/json", "Authorization": f"Bearer {ACCESS_TOKEN}"}
+        
+        now = get_now_kolkata()
+        yesterday_date = (now - dt.timedelta(days=1)).strftime('%Y-%m-%d')
+        from_date = (now - dt.timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        history_url = f"https://api.upstox.com/v2/historical-candle/{encoded_symbol}/day/{yesterday_date}/{from_date}"
+        
+        logger.info(f"📐 Fetching historical data for CPR calculation ({from_date} to {yesterday_date})...")
+        r_hist = session.get(history_url, headers=headers, timeout=10)
+        if r_hist.status_code != 200:
+            logger.error(f"  ❌ CPR history fetch failed: {r_hist.status_code}")
+            return None
+            
+        hist_candles = r_hist.json().get('data', {}).get('candles', [])
+        if not hist_candles:
+            logger.error("  ❌ CPR history candles empty")
+            return None
+            
+        df = pd.DataFrame(hist_candles, columns=["time","open","high","low","close","volume","oi"])
+        df["time"] = pd.to_datetime(df["time"])
+        df["high"] = df["high"].astype(float)
+        df["low"] = df["low"].astype(float)
+        df["close"] = df["close"].astype(float)
+        df = df.sort_values("time").reset_index(drop=True)
+        
+        if df.empty:
+            logger.error("  ❌ CPR history empty after parsing")
+            return None
+            
+        prev_day_candle = df.iloc[-1]
+        prev_high = float(prev_day_candle['high'])
+        prev_low = float(prev_day_candle['low'])
+        prev_close = float(prev_day_candle['close'])
+        prev_day = pd.to_datetime(prev_day_candle['time']).date()
+        
+        pivot = (prev_high + prev_low + prev_close) / 3.0
+        bc = (prev_high + prev_low) / 2.0
+        tc = (pivot - bc) + pivot
+        
+        actual_tc = max(tc, bc)
+        actual_bc = min(tc, bc)
+        
+        cpr_width_pct = (actual_tc - actual_bc) / pivot * 100
+        
+        if cpr_width_pct >= 0.25:
+            cpr_type = "WIDE CPR ↔️ (Sideways/Mean-Reversion Expected)"
+            TRIGGER_OPPOSITE_SIGNAL = True
+        elif cpr_width_pct < 0.12:
+            cpr_type = "NARROW CPR 🚀 (Strong Trend/Breakout Expected)"
+            TRIGGER_OPPOSITE_SIGNAL = False
+        else:
+            cpr_type = "AVERAGE CPR 📈 (Normal Market/Breakout Allowed)"
+            TRIGGER_OPPOSITE_SIGNAL = False
+            
+        cpr = {
+            'TC': actual_tc,
+            'Pivot': pivot,
+            'BC': actual_bc,
+            'prev_high': prev_high,
+            'prev_low': prev_low,
+            'prev_close': prev_close,
+            'date': prev_day,
+            'width_pct': cpr_width_pct,
+            'type': cpr_type
+        }
+        
+        logger.info(f"  📐 CPR calculated for previous day ({prev_day}): High={prev_high:.2f}, Low={prev_low:.2f}, Close={prev_close:.2f}")
+        logger.info(f"  📐 CPR Levels: TC={actual_tc:.2f} | Pivot={pivot:.2f} | BC={actual_bc:.2f}")
+        logger.info(f"  📐 CPR Width: {cpr_width_pct:.3f}% | Type: {cpr_type}")
+        logger.info(f"  🔄 DYNAMIC OPPOSITE MODE: TRIGGER_OPPOSITE_SIGNAL is set to {TRIGGER_OPPOSITE_SIGNAL}")
+        
+        return cpr
+    except Exception as e:
+        logger.error(f"  ❌ CPR calculation error: {e}", exc_info=True)
+        return None
 
 # ==================== GET DAY'S OPEN (explicit 09:15) ====================
 def get_days_open_from_intraday():
@@ -1021,7 +1174,7 @@ def fetch_live_spot_candles(symbol):
 
 # ==================== MAIN LOOP ====================
 def main():
-    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache, trade_completed_today
+    global last_signal_time, open_position, days_open_cache, current_expiry_date, contracts_cache, trade_completed_today, trades_completed_today, option_instruments, cpr_levels, total_pnl_today
 
     with open(CSV_FILE, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -1034,10 +1187,18 @@ def main():
     logger.info("CSV file initialized: " + CSV_FILE)
     logger.info("\n📥 Initializing...")
     
+    # Check if option instruments need to be fetched/updated dynamically
+    if not option_instruments:
+        logger.info("Option instruments not preloaded. Fetching now...")
+        option_instruments = get_option_instruments()
+        
+    logger.info("📐 Calculating CPR levels for today...")
+    cpr_levels = get_cpr_levels()
+
     # Instruments already loaded in global scope (from __main__ block)
     logger.info(f"✅ Loaded {len(contracts_cache)} instruments (from cache)")
     current_expiry_date = current_expiry_date or get_next_weekly_expiry()
-    print_startup_banner()
+    print_startup_banner(cpr_levels)
 
     iteration = 0
     try:
@@ -1083,7 +1244,9 @@ def main():
                         else:
                             logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
                             
+                        total_pnl_today += pnl
                         logger.info(f"   P&L: ₹{pnl:.2f} (₹{premium_diff:.2f} × {LOT_SIZE})")
+                        logger.info(f"   Cumulative Daily P&L: ₹{total_pnl_today:.2f}")
 
                         log_trade_to_csv(timestamp, f"EXIT {open_position.signal_type}", open_position.strike,
                                          current_premium, 0, 0, 0, 0, "", "MARKET CLOSE", pnl, premium_diff)
@@ -1100,9 +1263,12 @@ def main():
                             ]
                         )
                         open_position = None
+                        trades_completed_today += 1
 
                 days_open_cache = None
                 trade_completed_today = False  # Reset for next day
+                trades_completed_today = 0     # Reset count for next day
+                total_pnl_today = 0.0          # Reset daily PnL for next day
                 time.sleep(60)
                 continue
 
@@ -1129,60 +1295,102 @@ def main():
                         timestamp = now.strftime('%Y-%m-%d %I:%M:%S %p')
 
                         logger.info("\n" + "="*85)
-                        logger.info(f"🔔 POSITION CLOSED: {exit_reason}")
+                        logger.info(f"🔔 POSITION EXITING: {exit_reason}")
                         logger.info("="*85)
                         
-                        # ===== CANCEL SL ORDER IF EXISTS (for trailing/target exit) =====
-                        if open_position.sl_order_id and "STOP LOSS" not in exit_reason:
-                            # If we hit target or trailing stop, we must cancel the exchange SL
-                            # If we hit SL, the order is already executed (or we are market exiting)
-                            # Actually, if "STOP LOSS" is in reason, it might be SOFTWARE SL hit before exchange?
-                            # If exchange SL hit, the position manager loop might not even know yet until next poll?
-                            # But here we are EXPLICITLY closing via software condition.
-                            # So yes, cancel SL.
-                            logger.info(f"  🚫 Cancelling SL order: {open_position.sl_order_id}...")
-                            cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
-                            if cancel_success:
-                                logger.info(f"  ✅ SL ORDER CANCELLED")
-                            else:
-                                logger.warning(f"  ⚠️ SL Cancel failed: {cancel_msg}")
-                        # ============================================================
+                        exit_order_placed = False
+                        exit_order_id = None
                         
-                        # ===== LIVE ORDER: EXIT AT SL/TP/TRAILING =====
-                        # Only place exit order if SL didn't trigger on exchange
-                        if "STOP LOSS" not in exit_reason or not open_position.sl_order_id:
+                        # ===== DOUBLE SELL PREVENTION / CANCEL SL ORDER =====
+                        if open_position.sl_order_id:
+                            if "STOP LOSS" not in exit_reason:
+                                # We are exiting due to Trailing Stop or Target Profit.
+                                # We must cancel the exchange SL order first.
+                                logger.info(f"  🚫 Cancelling SL order: {open_position.sl_order_id}...")
+                                cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
+                                if cancel_success:
+                                    logger.info(f"  ✅ SL ORDER CANCELLED SUCCESS")
+                                    # Now place market exit
+                                    exit_success, exit_order_id, exit_msg = exit_position(open_position)
+                                    if exit_success:
+                                        exit_order_placed = True
+                                        open_position.exit_order_id = exit_order_id
+                                        logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
+                                    else:
+                                        logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
+                                else:
+                                    logger.warning(f"  ⚠️ SL Cancel failed: {cancel_msg}")
+                                    # Verify if SL was already filled
+                                    sl_status = check_order_status(open_position.sl_order_id)
+                                    if sl_status == 'complete':
+                                        logger.info(f"  ✅ SL ORDER CONFIRMED ALREADY FILLED (No Market Exit needed)")
+                                        exit_order_id = open_position.sl_order_id
+                                        exit_reason = f"STOP LOSS (Filled on Exchange instead of {exit_reason})"
+                                        exit_order_placed = True
+                                    else:
+                                        logger.critical(f"  🚨 SL CANCEL FAILED AND STATUS IS '{sl_status}'. MANUAL INTERVENTION REQUIRED!")
+                                        send_discord_alert(
+                                            "🚨 CRITICAL: Exit Collision Risk",
+                                            f"SL cancel failed: {cancel_msg}. Order status is '{sl_status}'. Please check Upstox terminal immediately!",
+                                            0xff0000
+                                        )
+                                        # Force exit as a last resort because the SL is still not filled
+                                        exit_success, exit_order_id, exit_msg = exit_position(open_position)
+                                        if exit_success:
+                                            exit_order_placed = True
+                                            open_position.exit_order_id = exit_order_id
+                                            logger.info(f"  ✅ FORCE EXIT ORDER PLACED: {exit_order_id}")
+                                            exit_reason += " (FORCE EXIT)"
+                            else:
+                                # We are exiting due to Stop Loss.
+                                # Check if the exchange SL was already filled
+                                sl_status = check_order_status(open_position.sl_order_id)
+                                logger.info(f"  🔍 SL Triggered - Verifying Order Status: {sl_status}")
+                                
+                                if sl_status == 'complete':
+                                    logger.info(f"  ✅ SL ORDER CONFIRMED FILLED ON EXCHANGE")
+                                    exit_order_id = open_position.sl_order_id
+                                    exit_order_placed = True
+                                else:
+                                    logger.warning(f"  ⚠️ SL HIT PRICE but Order Status is '{sl_status}' (Not Filled)")
+                                    logger.warning(f"  🔄 FORCE EXITING at Market to ensure protection...")
+                                    
+                                    # Cancel the pending SL order first
+                                    cancel_success, cancel_msg = cancel_order(open_position.sl_order_id)
+                                    if cancel_success:
+                                        logger.info(f"  🚫 Pending SL Order Cancelled")
+                                        # Place Market Exit
+                                        exit_success, exit_order_id, exit_msg = exit_position(open_position)
+                                        if exit_success:
+                                            exit_order_placed = True
+                                            open_position.exit_order_id = exit_order_id
+                                            logger.info(f"  ✅ FORCE EXIT ORDER PLACED: {exit_order_id}")
+                                            exit_reason += " (FORCE EXIT)"
+                                        else:
+                                            logger.error(f"  ❌ FORCE EXIT ORDER FAILED: {exit_msg}")
+                                    else:
+                                        logger.warning(f"  ⚠️ SL Cancel failed: {cancel_msg}. Checking status again...")
+                                        sl_status_retry = check_order_status(open_position.sl_order_id)
+                                        if sl_status_retry == 'complete':
+                                            logger.info(f"  ✅ SL ORDER CONFIRMED FILLED ON RETRY")
+                                            exit_order_id = open_position.sl_order_id
+                                            exit_order_placed = True
+                                        else:
+                                            logger.critical(f"  🚨 SL CANCEL FAILED AND STATUS IS '{sl_status_retry}'. MANUAL INTERVENTION REQUIRED!")
+                                            send_discord_alert(
+                                                "🚨 CRITICAL: Double Sell Prevention",
+                                                f"SL cancel failed: {cancel_msg}. Order status is '{sl_status_retry}'. Please check Upstox terminal immediately!",
+                                                0xff0000
+                                            )
+                        else:
+                            # No active exchange SL order (e.g. fallback to software SL or paper trading)
                             exit_success, exit_order_id, exit_msg = exit_position(open_position)
                             if exit_success:
+                                exit_order_placed = True
                                 open_position.exit_order_id = exit_order_id
                                 logger.info(f"  ✅ EXIT ORDER PLACED: {exit_order_id}")
                             else:
                                 logger.error(f"  ❌ EXIT ORDER FAILED: {exit_msg}")
-                        else:
-                            # SL triggered on exchange - VERIFY IT WAS FILLED
-                            # We can't just assume it filled because price touched trigger
-                            sl_status = check_order_status(open_position.sl_order_id)
-                            logger.info(f"  🔍 SL Triggered - Verifying Order Status: {sl_status}")
-                            
-                            if sl_status == 'complete':
-                                logger.info(f"  ✅ SL ORDER CONFIRMED FILLED ON EXCHANGE")
-                                exit_order_id = open_position.sl_order_id
-                            else:
-                                logger.warning(f"  ⚠️ SL HIT PRICE but Order Status is '{sl_status}' (Not Filled)")
-                                logger.warning(f"  🔄 FORCE EXITING at Market to ensure protection...")
-                                
-                                # Cancel the pending SL order first
-                                cancel_success, _ = cancel_order(open_position.sl_order_id)
-                                if cancel_success:
-                                    logger.info(f"  🚫 Pending SL Order Cancelled")
-                                    
-                                # Place Market Exit
-                                exit_success, exit_order_id, exit_msg = exit_position(open_position)
-                                if exit_success:
-                                    open_position.exit_order_id = exit_order_id
-                                    logger.info(f"  ✅ FORCE EXIT ORDER PLACED: {exit_order_id}")
-                                    exit_reason += " (FORCE EXIT)"
-                                else:
-                                    logger.error(f"  ❌ FORCE EXIT ORDER FAILED: {exit_msg}")
                         # ==============================================
                         
                         logger.info(f"  Entry:       ₹{open_position.entry_premium:.2f}")
@@ -1208,15 +1416,42 @@ def main():
 
                         open_position = None
                         last_signal_time = now
-                        trade_completed_today = True  # One trade per day - done for today
-                        logger.info("  📅 Daily trade limit reached - No more trades today")
-                        logger.info("  ⏹️  MISSION ACCOMPLISHED: Trade Completed. Exiting Bot.")
-                        
-                        # Ensure the final discord alert has time to send before exiting
-                        if discord_thread:
-                            discord_thread.join(timeout=5.0)
+                        trades_completed_today += 1
+                        total_pnl_today += final_pnl
+                        logger.info(f"  📅 Trade #{trades_completed_today} completed today.")
+                        logger.info(f"  📊 Cumulative Daily P&L: ₹{total_pnl_today:.2f}")
+
+                        # Check if target daily profit reached
+                        if total_pnl_today >= DAILY_PROFIT_TARGET:
+                            logger.info(f"  🏆 DAILY PROFIT TARGET REACHED! Cumulative P&L: ₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}")
+                            logger.info("  ⏹️  MISSION ACCOMPLISHED: Target Profit Reached. Stopping the Bot.")
                             
-                        sys.exit(0)
+                            target_discord_thread = send_discord_alert(
+                                "🏆 Daily Profit Target Reached!",
+                                f"Cumulative Daily P&L of ₹{total_pnl_today:.2f} reached the target of ₹{DAILY_PROFIT_TARGET:.2f}.\nStopping the bot.",
+                                0x00ff00
+                            )
+                            if target_discord_thread:
+                                target_discord_thread.join(timeout=5.0)
+                            if discord_thread:
+                                discord_thread.join(timeout=5.0)
+                            sys.exit(0)
+
+                        limit = MAX_TRADES_PER_DAY if ENABLE_MULTIPLE_TRADES else 1
+                        if trades_completed_today >= limit:
+                            trade_completed_today = True
+                            if ENABLE_MULTIPLE_TRADES:
+                                logger.info(f"  📅 Daily trade limit of {limit} reached - No more trades today.")
+                                logger.info("  ⏹️  Daily limit reached. Bot will remain active in monitor-only mode.")
+                            else:
+                                logger.info("  📅 Daily trade limit (1 trade) reached - No more trades today.")
+                                logger.info("  ⏹️  MISSION ACCOMPLISHED: Trade Completed. Exiting Bot.")
+                                # Ensure the final discord alert has time to send before exiting
+                                if discord_thread:
+                                    discord_thread.join(timeout=5.0)
+                                sys.exit(0)
+                        else:
+                            logger.info(f"  🔄 Bot remains active. Cooldown active for {SIGNAL_COOLDOWN}s. Waiting for the next signal...")
 
                 time.sleep(POSITION_MONITOR_INTERVAL)
                 continue
@@ -1254,7 +1489,12 @@ def main():
             else:
                 logger.info(f"  ✅ Live OI: CE={oi_ce:,} | PE={oi_pe:,} → {oi_trend} ({oi_conf})")
 
-            print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe)
+            print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe, cpr_levels)
+
+            # Check if daily profit target reached
+            if total_pnl_today >= DAILY_PROFIT_TARGET:
+                logger.info(f"\n🏆 DAILY PROFIT TARGET MET (₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}) - Stopping Bot.")
+                sys.exit(0)
 
             # Check if daily trade limit reached
             if trade_completed_today:
@@ -1272,7 +1512,7 @@ def main():
                     time.sleep(60)
                     continue
 
-            signal, conditions = check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_conf)
+            signal, conditions = check_signal_conditions(spot, day_open, vwap, rsi, oi_trend, oi_conf, cpr_levels)
             print_signal_evaluation(conditions)
 
             if signal:
