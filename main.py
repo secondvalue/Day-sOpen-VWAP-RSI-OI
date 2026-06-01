@@ -78,6 +78,7 @@ ENABLE_MULTIPLE_TRADES = True  # <<-- Toggle: True to enable multiple trades per
 MAX_TRADES_PER_DAY = 5        # <<-- Maximum trades allowed per day if multiple trades are enabled
 
 # Daily Profit Target: if reached, stop the bot (no more trades)
+ENABLE_DAILY_PROFIT_LOCK = True  # Toggle: Set to True to enable 3000 profit lock (stops bot), False to disable
 DAILY_PROFIT_TARGET = 3000.0
 MIN_5MIN_BARS = 1
 
@@ -891,7 +892,7 @@ Stop Loss:   ₹{STOP_LOSS:.2f} (Base: ₹{BASE_STOP_LOSS:.2f} | ~{STOP_LOSS/LOT
 Target:      ₹{TAKE_PROFIT:.2f} (Base: ₹{BASE_TAKE_PROFIT:.2f} | ~{TAKE_PROFIT/LOT_SIZE:.2f} pts)
 Trailing:    ₹{TRAILING_STOP:.2f} Step (Base: ₹{BASE_TRAILING_STOP:.2f} | ~{TRAILING_STOP/LOT_SIZE:.2f} pts)
 Profit Lock: {'Reached ₹' + f'{PROFIT_LOCK_TRIGGER:.2f}' + ' -> Lock in ₹' + f'{PROFIT_LOCK_LIMIT:.2f}' if ENABLE_PROFIT_LOCK else 'DISABLED ❌'}
-Daily Profit Target: ₹{DAILY_PROFIT_TARGET:.2f} (Bot stops if hit)
+Daily Profit Target: ₹{DAILY_PROFIT_TARGET:.2f} ({'ENABLED ✅' if ENABLE_DAILY_PROFIT_LOCK else 'DISABLED ❌'})
 Polling:     Signal Check: {SIGNAL_CHECK_INTERVAL}s | Position Monitor: {POSITION_MONITOR_INTERVAL}s
 Opposite:    {'ENABLED ✅' if TRIGGER_OPPOSITE_SIGNAL else 'DISABLED ❌'}
 Protection:  Exchange SL Order
@@ -1422,7 +1423,7 @@ def main():
                         logger.info(f"  📊 Cumulative Daily P&L: ₹{total_pnl_today:.2f}")
 
                         # Check if target daily profit reached
-                        if total_pnl_today >= DAILY_PROFIT_TARGET:
+                        if ENABLE_DAILY_PROFIT_LOCK and total_pnl_today >= DAILY_PROFIT_TARGET:
                             logger.info(f"  🏆 DAILY PROFIT TARGET REACHED! Cumulative P&L: ₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}")
                             logger.info("  ⏹️  MISSION ACCOMPLISHED: Target Profit Reached. Stopping the Bot.")
                             
@@ -1492,7 +1493,7 @@ def main():
             print_market_snapshot(spot, day_open, vwap, rsi, oi_trend, oi_ce, oi_pe, cpr_levels)
 
             # Check if daily profit target reached
-            if total_pnl_today >= DAILY_PROFIT_TARGET:
+            if ENABLE_DAILY_PROFIT_LOCK and total_pnl_today >= DAILY_PROFIT_TARGET:
                 logger.info(f"\n🏆 DAILY PROFIT TARGET MET (₹{total_pnl_today:.2f} >= ₹{DAILY_PROFIT_TARGET:.2f}) - Stopping Bot.")
                 sys.exit(0)
 
